@@ -140,7 +140,10 @@ export function PowerPoolLabScreen() {
                 label="Model"
                 items={models.map((m) => ({
                   value: m.id,
-                  label: `${m.label} · ${fmt.int(m.remainingToday)} left today`,
+                  label:
+                    m.provider === 'codex'
+                      ? `${m.label} · Medium · ChatGPT allowance`
+                      : `${m.label} · ${fmt.int(m.remainingToday)} left today`,
                 }))}
                 value={model}
                 onChange={(v) => set({ model: v })}

@@ -23,6 +23,8 @@ from ..labs.launch import (
     synced_universes,
 )
 from ..labs.params import POWER_POOL_SAMPLER, PowerPoolParams
+from ..llm.codex_cli import DEFAULT_MODEL_ID as CODEX_DEFAULT_MODEL
+from ..llm.codex_cli import MEDIUM_EFFORT
 from ..llm.prompts import POWER_POOL_LAB
 from ..llm.registry import DEFAULT_MODEL
 from ..llm.text import estimate_tokens
@@ -49,7 +51,8 @@ class PowerPoolModel(Out):
     label: str
     provider: str
     tpm: int
-    remaining_today: int
+    remaining_today: int | None
+    effort: str | None = None
 
 
 class PowerPoolOptions(Out):
@@ -72,17 +75,26 @@ class PowerPoolPreview(Out):
     prompt: PowerPoolPrompt | None
     problems: list[str]
     warnings: list[str]
+    model: str
+    effort: str | None
 
 
 async def _models(state: Any) -> list[dict[str, Any]]:
     """Models whose provider has an enabled Key, richest daily budget first."""
     keys = [k for k in await state.llm.keys.list_keys() if k.enabled]
+    codex_connected = await state.llm.codex.connected()
     out = []
     for m in state.llm.registry.all():
         mine = [k for k in keys if k.provider == m.provider]
-        if m.kind == "embedding" or not mine:
+        if m.kind == "embedding" or (m.provider != "codex" and not mine):
             continue
-        left = sum([(await state.llm.ledger.headroom(k.id, m)).daily_remaining for k in mine])
+        if m.provider == "codex" and not codex_connected:
+            continue
+        left = (
+            None
+            if m.provider == "codex"
+            else sum([(await state.llm.ledger.headroom(k.id, m)).daily_remaining for k in mine])
+        )
         out.append(
             {
                 "id": m.id,
@@ -90,6 +102,7 @@ async def _models(state: Any) -> list[dict[str, Any]]:
                 "provider": m.provider,
                 "tpm": m.tpm,
                 "remainingToday": left,
+                "effort": MEDIUM_EFFORT if m.provider == "codex" else None,
             }
         )
     return out
@@ -102,7 +115,13 @@ async def options(state: State) -> PowerPoolOptions:
     return PowerPoolOptions.model_validate(
         {
             "models": models,
-            "defaultModel": DEFAULT_MODEL if DEFAULT_MODEL in ids else (ids[0] if ids else None),
+            "defaultModel": (
+                DEFAULT_MODEL
+                if DEFAULT_MODEL in ids
+                else CODEX_DEFAULT_MODEL
+                if CODEX_DEFAULT_MODEL in ids
+                else (ids[0] if ids else None)
+            ),
             "maxSimulations": search.MAX_SIMULATIONS,
         }
     )
@@ -120,7 +139,10 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
     model_id = body.model or DEFAULT_MODEL
     info = state.llm.registry.get(model_id)
     if model_id not in models or info is None:
-        problems.append(f"{model_id} can't run: no enabled Key for it. Add one in LLM Integration.")
+        problems.append(
+            f"{model_id} can't run. Sign in to Codex with ChatGPT or add an enabled Key "
+            "in LLM Integration."
+        )
 
     schema = await state.metadata.cached_settings_schema()
     legal = legal_choices(schema, body.region, body.delay)
@@ -173,7 +195,8 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
                         "Choose another model."
                     )
     calls = -(-body.simulations // power_pool.PER_CALL)
-    if model_id in models and calls > models[model_id]["remainingToday"]:
+    remaining = models.get(model_id, {}).get("remainingToday")
+    if remaining is not None and calls > remaining:
         warnings.append(
             f"About {calls:,} LLM calls; {model_id} has "
             f"{models[model_id]['remainingToday']:,} left today, "
@@ -188,6 +211,7 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
         "problems": problems,
         "warnings": warnings,
         "model": model_id,
+        "effort": MEDIUM_EFFORT if info is not None and info.provider == "codex" else None,
     }
 
 
@@ -216,6 +240,7 @@ async def add_task(body: PowerPoolRequest, state: State) -> AddedTask:
             neutralizations=plan["neutralizations"],
             dataset_ids=body.dataset_ids,
             model=plan["model"],
+            effort=plan["effort"],
             cores=body.cores,
             llm={"calls": 0},
         ),

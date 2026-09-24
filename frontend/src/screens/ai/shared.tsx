@@ -4,6 +4,8 @@ import { llm } from '@/screens/ai/api'
 
 export const useKeys = (refetchInterval: number | false = false) =>
   useQuery({ queryKey: ['ai', 'keys'], queryFn: llm.keys, refetchInterval })
+export const useCodex = () =>
+  useQuery({ queryKey: ['ai', 'codex'], queryFn: llm.codex, staleTime: 30_000 })
 export const useProviders = () =>
   useQuery({
     queryKey: ['ai', 'providers'],

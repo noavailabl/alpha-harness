@@ -200,6 +200,10 @@ class ChatService:
             response_schema=FIELD_PICK_SCHEMA,
             thinking=REASONING[reasoning]["level"],
         )
+        answered_by = self.llm.registry.get(answer.model)
+        effective_reasoning: Reasoning = (
+            "careful" if answered_by is not None and answered_by.provider == "codex" else reasoning
+        )
 
         parsed = _parse(answer.text)
         # Drop anything not really in the catalog: a hallucinated field costs a simulation
@@ -223,7 +227,7 @@ class ChatService:
             dropped=dropped,
             catalogNote=catalog_note,
             model=answer.model,
-            reasoning=reasoning,
+            reasoning=effective_reasoning,
             tokens=answer.total_tokens,
         )
         await self._touch(thread_id)
@@ -237,7 +241,7 @@ class ChatService:
             "catalogNote": catalog_note,
             "usage": answer.usage,
             "model": answer.model,
-            "reasoning": reasoning,
+            "reasoning": effective_reasoning,
         }
 
     # -- helpers ---------------------------------------------------------

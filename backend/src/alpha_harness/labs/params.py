@@ -84,6 +84,8 @@ class PowerPoolParams(TaskParams):
     universe: str | None = None
     dataset_ids: list[str] = Field(default_factory=list)
     model: str = ""
+    #: GPT models always run at Medium; stored so task details remain auditable.
+    effort: str | None = None
     #: Running LLM tallies: ``calls``, ``empty``, ``failed`` and ``byDataset``.
     llm: dict[str, Any] = Field(default_factory=dict)
     #: The last hundred LLM calls, for the task's detail view.

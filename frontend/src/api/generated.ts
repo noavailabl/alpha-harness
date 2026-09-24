@@ -1067,6 +1067,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm/codex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codex Status
+         * @description Whether the local Codex CLI can use the signed-in ChatGPT allowance.
+         */
+        get: operations["codex_status_api_llm_codex_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/prompts": {
         parameters: {
             query?: never;
@@ -2550,6 +2570,20 @@ export interface components {
             /** Updatedat */
             updatedAt: string | null;
         };
+        /** CodexStatus */
+        CodexStatus: {
+            /** Connected */
+            connected: boolean;
+            /** Auth */
+            auth: string | null;
+            /** Model */
+            model: string;
+            /**
+             * Reasoningeffort
+             * @constant
+             */
+            reasoningEffort: "medium";
+        };
         /** CorrelatedPair */
         CorrelatedPair: {
             /** A */
@@ -3543,9 +3577,11 @@ export interface components {
             /** Provider */
             provider: string;
             /** Remainingtoday */
-            remainingToday: number;
+            remainingToday: number | null;
             /** Tpm */
             tpm: number;
+            /** Effort */
+            effort?: string | null;
         };
         /** PowerPoolOptions */
         PowerPoolOptions: {
@@ -3571,6 +3607,10 @@ export interface components {
             universes: string[];
             /** Warnings */
             warnings: string[];
+            /** Model */
+            model: string;
+            /** Effort */
+            effort: string | null;
         };
         /** PowerPoolPrompt */
         PowerPoolPrompt: {
@@ -6391,6 +6431,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LLMModels"];
+                };
+            };
+        };
+    };
+    codex_status_api_llm_codex_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexStatus"];
                 };
             };
         };

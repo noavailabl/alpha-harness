@@ -157,6 +157,23 @@ class ModelRegistry:
         for model in provider_models():
             self._models.setdefault(model.id, model)
 
+        from .codex_cli import CODEX_MODELS
+
+        for model in CODEX_MODELS:
+            self._models.setdefault(
+                model.id,
+                ModelInfo(
+                    id=model.id,
+                    label=model.label,
+                    kind="text",
+                    provider="codex",
+                    rpm=60,
+                    tpm=1_000_000,
+                    rpd=1_000_000,
+                    bulk=True,
+                ),
+            )
+
     # -- reading ---------------------------------------------------------
 
     def get(self, model_id: str) -> ModelInfo | None:

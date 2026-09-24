@@ -37,12 +37,13 @@ import {
 import { Confirm, Select } from '@/ui/overlay'
 import { SplitPane } from '@/ui/panels'
 import { ScopePicker } from '@/ui/scope-picker'
-import { useKeys } from './shared'
+import { useCodex, useKeys } from './shared'
 
 export function Assistant({ threadId }: { threadId: number | null }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const keys = useKeys()
+  const codex = useCodex()
   const options = useQuery({
     queryKey: ['ai', 'chat', 'options'],
     queryFn: chat.options,
@@ -76,15 +77,26 @@ export function Assistant({ threadId }: { threadId: number | null }) {
   }, [threadScope, setScope])
 
   const enabledProviders = new Set(keys.data?.keys.filter((k) => k.enabled).map((k) => k.provider))
+  if (codex.data?.connected) enabledProviders.add('codex')
   const modelItems = (options.data?.models.models ?? [])
     .filter((m) => m.kind !== 'embedding' && enabledProviders.has(m.provider))
-    .map((m) => ({ value: m.id, label: `${m.label} · ${m.provider}` }))
+    .map((m) => ({
+      value: m.id,
+      label:
+        m.provider === 'codex'
+          ? `${m.label} · Medium · ChatGPT allowance`
+          : `${m.label} · ${m.provider}`,
+    }))
   const defaultModel = options.data?.models.defaults.chat
   const modelValue =
     (model && modelItems.some((m) => m.value === model) ? model : null) ??
     (modelItems.some((m) => m.value === defaultModel) ? defaultModel : modelItems[0]?.value) ??
     null
-  const reasoningValue = reasoning ?? options.data?.defaultReasoning ?? 'normal'
+  const gptSelected =
+    options.data?.models.models.find((m) => m.id === modelValue)?.provider === 'codex'
+  const reasoningValue = gptSelected
+    ? 'careful'
+    : (reasoning ?? options.data?.defaultReasoning ?? 'normal')
   const reasoningHelp = options.data?.reasoning.find((r) => r.value === reasoningValue)?.description
 
   const notDownloaded =
@@ -147,8 +159,9 @@ export function Assistant({ threadId }: { threadId: number | null }) {
   }, [messages.length, say.isPending])
 
   if (keys.isError) return <ErrorNotice title="Could not load the Keys" error={keys.error} />
-  if (!keys.data) return <Skeleton className="h-96" />
-  if (keys.data.enabled === 0) {
+  if (codex.isError) return <ErrorNotice title="Could not check Codex" error={codex.error} />
+  if (!keys.data || !codex.data) return <Skeleton className="h-96" />
+  if (keys.data.enabled === 0 && !codex.data.connected) {
     return (
       <Panel>
         <Empty title="The assistant needs a Key">
@@ -339,13 +352,17 @@ export function Assistant({ threadId }: { threadId: number | null }) {
               />
               <Select
                 label="Reasoning"
-                items={(options.data?.reasoning ?? []).map((r) => ({
-                  value: r.value,
-                  label: r.label,
-                }))}
+                items={
+                  gptSelected
+                    ? [{ value: 'careful', label: 'Medium (fixed)' }]
+                    : (options.data?.reasoning ?? []).map((r) => ({
+                        value: r.value,
+                        label: r.label,
+                      }))
+                }
                 value={reasoningValue}
                 onChange={setReasoning}
-                disabled={say.isPending}
+                disabled={say.isPending || gptSelected}
               />
               <span className="ml-auto hidden items-center gap-1 sm:inline-flex">
                 <Kbd>Ctrl</Kbd>

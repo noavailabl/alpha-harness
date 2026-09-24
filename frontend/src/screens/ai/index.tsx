@@ -21,17 +21,18 @@ import { Budget } from './budget'
 import { Keys } from './keys'
 import { Prompts } from './prompts'
 import { Providers } from './providers'
-import { useKeys } from './shared'
+import { useCodex, useKeys } from './shared'
 
 const SCREENS = { keys: Keys, budget: Budget, prompts: Prompts } as const
 
 export function AiScreen() {
   const params = useParams({ strict: false })
   const keys = useKeys()
+  const codex = useCodex()
   const threadId = params.threadId ? Number(params.threadId) || null : null
   const tab = params.threadId ? 'assistant' : params.tab
   const Screen = tab && tab in SCREENS ? SCREENS[tab as keyof typeof SCREENS] : null
-  const hasKeys = (keys.data?.keys.length ?? 0) > 0
+  const hasAssistant = (keys.data?.keys.length ?? 0) > 0 || codex.data?.connected === true
 
   // Every branch keeps its slot, so the provider grid (and its open popup) stays mounted when
   // the first key lands and the tab bar appears above it.
@@ -39,7 +40,7 @@ export function AiScreen() {
     <Page>
       <PageHeader title="LLM Integration" />
       {keys.isError && <ErrorNotice title="Could not load the Keys" error={keys.error} />}
-      {hasKeys && (
+      {hasAssistant && (
         <TabBar>
           {AI_TABS.map((t) => (
             <TabLink key={t.tab} to="/ai/$tab" params={{ tab: t.tab }}>
@@ -48,9 +49,9 @@ export function AiScreen() {
           ))}
         </TabBar>
       )}
-      {keys.isPending ? (
+      {keys.isPending || codex.isPending ? (
         <Skeleton className="h-64" />
-      ) : !hasKeys || tab === 'providers' ? (
+      ) : !hasAssistant || tab === 'providers' ? (
         <Providers />
       ) : tab === 'assistant' ? (
         <Assistant threadId={threadId} />

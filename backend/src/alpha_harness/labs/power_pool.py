@@ -412,7 +412,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
         by = dict(llm.get("byDataset") or {})
         ids = run.dataset_ids
         dataset = min(ids, key=lambda d: (by.get(d, {}).get("calls", 0), ids.index(d)))
-        model = optimizer.llm.registry.get(run.model)
+        model = optimizer.llm.model_for(run.model)
         operators = await optimizer.metadata.cached_operators() or []
         ctx = await context_for(
             optimizer.alphas.catalog, run.region, run.delay, run.universes, dataset
@@ -443,6 +443,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
             "at": utcnow().isoformat(),
             "dataset": dataset,
             "model": model.id,
+            "effort": "medium" if model.provider == "codex" else run.effort,
             "fields": shown,
         }
         items: list[dict[str, Any]] = []
@@ -454,6 +455,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
                 model_id=model.id,
                 response_schema=SCHEMA,
                 temperature=1.0,
+                thinking=run.effort,
             )
             answered = True
             items = parse_alphas(answer.text)[:40]

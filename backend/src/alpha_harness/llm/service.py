@@ -21,6 +21,8 @@ from openai import DefaultAsyncHttpxClient
 
 from ..schemas import camel_dict
 from .budget import Ledger
+from .codex_cli import DEFAULT_MODEL_ID as CODEX_DEFAULT_MODEL
+from .codex_cli import LEGACY_MODEL_ID, CodexCLI
 from .keys import BudgetExhaustedError, KeyStore, LLMError
 from .openai_compat import OpenAICompatible, ProviderError
 from .providers import PROVIDERS
@@ -133,6 +135,7 @@ class LLMService:
         self.registry = registry
         self.ledger = Ledger(db)
         self.keys = KeyStore(db, sealer, self.ledger)
+        self.codex = CodexCLI()
         self._http = DefaultAsyncHttpxClient(
             timeout=TIMEOUT_SECONDS, limits=httpx2.Limits(keepalive_expiry=KEEPALIVE_SECONDS)
         )
@@ -141,6 +144,11 @@ class LLMService:
         await self._http.aclose()
 
     # -- plumbing --------------------------------------------------------
+
+    def model_for(self, model_id: str | None) -> ModelInfo | None:
+        """Resolve saved model ids, including the first Codex integration's alias."""
+        resolved = CODEX_DEFAULT_MODEL if model_id == LEGACY_MODEL_ID else model_id or DEFAULT_MODEL
+        return self.registry.get(resolved)
 
     def _client(self, provider: str, secret: str) -> OpenAICompatible:
         # Not providers.get: its fallback to Google would send another provider's key there.
@@ -166,9 +174,24 @@ class LLMService:
         ``thinking`` is one of Google's thinking levels. Not a free upgrade: thinking tokens
         are billed against the same per-minute budget as the answer.
         """
-        model = self.registry.get(model_id or DEFAULT_MODEL)
+        model = self.model_for(model_id)
         if model is None:
             raise LLMError(f"{model_id!r} is not a known model. Choose one in AI › Budget.")
+        if model.provider == "codex":
+            reply = await self.codex.generate(
+                system,
+                user,
+                model=model.id,
+                schema=response_schema,
+            )
+            return Answer(
+                text=reply.text,
+                model=model.id,
+                prompt_tokens=reply.prompt_tokens,
+                output_tokens=reply.output_tokens,
+                thinking_tokens=0,
+                total_tokens=reply.total_tokens,
+            )
         estimate = estimate_tokens(system) + estimate_tokens(user)
         if estimate > model.tpm:
             # No wait fits a request bigger than the whole per-minute budget: say so, rather

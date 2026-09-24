@@ -8,7 +8,7 @@ import { fmt } from '@/lib/format'
 import { type LLMKey, type LLMProvider, llm } from '@/screens/ai/api'
 import { Badge, Button, Empty, ErrorNotice, Field, Input, Notice, Panel, Skeleton } from '@/ui/kit'
 import { Dialog } from '@/ui/overlay'
-import { useInvalidateKeys, useKeys, useModels, useProviders } from './shared'
+import { useCodex, useInvalidateKeys, useKeys, useModels, useProviders } from './shared'
 
 /** Enough to work with for a day, small enough that forgetting it is not expensive. */
 const DEFAULT_CAP = '250'
@@ -17,6 +17,7 @@ export function Providers() {
   const providers = useProviders()
   const models = useModels()
   const keys = useKeys()
+  const codex = useCodex()
   const [adding, setAdding] = useState<LLMProvider | null>(null)
 
   if (providers.isError)
@@ -82,6 +83,24 @@ export function Providers() {
 
   return (
     <>
+      <Panel title="Codex with ChatGPT">
+        {codex.isPending ? (
+          <Skeleton className="h-10" />
+        ) : codex.isError ? (
+          <ErrorNotice title="Could not check Codex" error={codex.error} />
+        ) : codex.data.connected ? (
+          <div className="flex flex-wrap items-center gap-2 text-body">
+            <Badge>Connected</Badge>
+            <span className="text-ink-muted">
+              Uses your ChatGPT sign-in · GPT reasoning is fixed at Medium
+            </span>
+          </div>
+        ) : (
+          <Notice tone="warn" title="Codex is not signed in with ChatGPT">
+            Sign in with Codex on this computer, then reload this page.
+          </Notice>
+        )}
+      </Panel>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{free.map(card)}</div>
       {/* Its own heading, below the free ones, because the default has to keep reading as
           "no card required" even once these exist. */}

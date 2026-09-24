@@ -16,6 +16,7 @@ export type LLMProvider = Schemas['LLMProvider']
 export type LLMProvidersResponse = Schemas['LLMProviders']
 export type LLMKey = Schemas['LLMKey']
 export type LLMKeyStatus = Schemas['LLMKeyStatus']
+export type CodexStatus = Schemas['CodexStatus']
 
 export interface AddKeyRequest {
   key: string
@@ -72,6 +73,7 @@ export interface DownloadedScope {
 }
 
 export const llm = {
+  codex: () => http.get<CodexStatus>('/api/llm/codex'),
   providers: () => http.get<LLMProvidersResponse>('/api/llm/providers'),
   models: () => http.get<LLMModels>('/api/llm/models'),
   keys: () => http.get<LLMKeyStatus>('/api/llm/keys'),

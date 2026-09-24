@@ -90,6 +90,13 @@ class KeyFailed(Out):
     error: str
 
 
+class CodexStatus(Out):
+    connected: bool
+    auth: str | None
+    model: str
+    reasoning_effort: Literal["medium"]
+
+
 def _check(result: dict[str, Any]) -> KeyWorks | KeyFailed:
     if result["ok"]:
         return KeyWorks.model_validate(result)
@@ -107,6 +114,20 @@ async def models(state: State) -> LLMModels:
     rather than sitting in a help page.
     """
     return state.llm.registry.roster()
+
+
+@router.get("/codex")
+async def codex_status(state: State) -> CodexStatus:
+    """Whether the local Codex CLI can use the signed-in ChatGPT allowance."""
+    from ..llm.codex_cli import DEFAULT_MODEL_ID, MEDIUM_EFFORT
+
+    connected = await state.llm.codex.connected()
+    return CodexStatus(
+        connected=connected,
+        auth="ChatGPT" if connected else None,
+        model=DEFAULT_MODEL_ID,
+        reasoning_effort=MEDIUM_EFFORT,
+    )
 
 
 # --- prompts --------------------------------------------------------------
