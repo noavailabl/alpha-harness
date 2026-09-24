@@ -10,8 +10,15 @@ import { labTasks, type RankedAlpha, type TaskAlpha } from '@/screens/tasks/api'
 import { compareAlphas, METRIC_COLUMNS, SETTING_COLUMNS } from '@/screens/tasks/columns'
 import type { Column, Sort } from '@/ui/table'
 
-/** The task's own columns, minus Checks Failed — every row here has none — plus the task. */
+/** The task's own columns, minus Checks Failed — every row here has none — plus its ID and task. */
 const columns = (): Column<RankedAlpha>[] => [
+  {
+    key: 'alphaId',
+    header: 'Alpha ID',
+    width: 'minmax(100px,0.9fr)',
+    sortable: true,
+    cell: (r) => <span className="num text-ink-muted">{r.alphaId}</span>,
+  },
   ...SETTING_COLUMNS,
   ...METRIC_COLUMNS,
   {
