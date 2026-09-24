@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -21,6 +22,7 @@ DEFAULT_MODEL_ID = "gpt-5.6-luna"
 MEDIUM_EFFORT = "medium"
 TIMEOUT_SECONDS = 300
 STATUS_SECONDS = 30
+USAGE_TIMEOUT_SECONDS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,3 +209,68 @@ class CodexCLI:
             detail = stderr.decode("utf-8", errors="replace").strip().splitlines()[-1:]
             raise LLMError(f"Codex failed: {detail[0][:250] if detail else 'unknown error'}")
         return _answer(stdout)
+
+    async def usage(self) -> dict[str, Any]:
+        """Read the signed-in account's current shared allowance from Codex."""
+        if not await self.connected():
+            raise LLMError("Codex is not signed in with ChatGPT.")
+        executable = self.executable()
+        if not executable:
+            raise LLMError("Codex CLI is not installed.")
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        process = await asyncio.create_subprocess_exec(
+            executable,
+            "app-server",
+            "--stdio",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_environment(),
+            creationflags=flags,
+        )
+        stdin, stdout = process.stdin, process.stdout
+        if stdin is None or stdout is None:
+            process.kill()
+            await process.communicate()
+            raise LLMError("Codex usage could not be read.")
+        messages = (
+            {
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {"name": "alpha-harness", "version": "2026.9.24"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            },
+            {"method": "initialized"},
+            {"id": 2, "method": "account/rateLimits/read"},
+        )
+        for message in messages:
+            stdin.write(json.dumps(message).encode() + b"\n")
+        await stdin.drain()
+
+        async def read() -> dict[str, Any]:
+            while line := await stdout.readline():
+                try:
+                    message = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if message.get("id") != 2:
+                    continue
+                if message.get("error"):
+                    raise LLMError(f"Codex usage could not be read: {message['error']}")
+                result = message.get("result")
+                if isinstance(result, dict):
+                    return result
+                break
+            raise LLMError("Codex usage did not return an account snapshot.")
+
+        try:
+            return await asyncio.wait_for(read(), timeout=USAGE_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            raise LLMError("Codex usage did not answer within 20 seconds.") from exc
+        finally:
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.terminate()
+            await process.communicate()

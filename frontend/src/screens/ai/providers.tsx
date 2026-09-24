@@ -5,10 +5,29 @@ import { ExternalLinkIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { fmt } from '@/lib/format'
-import { type LLMKey, type LLMProvider, llm } from '@/screens/ai/api'
-import { Badge, Button, Empty, ErrorNotice, Field, Input, Notice, Panel, Skeleton } from '@/ui/kit'
+import { type CodexUsage, type LLMKey, type LLMProvider, llm } from '@/screens/ai/api'
+import {
+  Badge,
+  Button,
+  Empty,
+  ErrorNotice,
+  Field,
+  Input,
+  Metric,
+  Notice,
+  Panel,
+  Progress,
+  Skeleton,
+} from '@/ui/kit'
 import { Dialog } from '@/ui/overlay'
-import { useCodex, useInvalidateKeys, useKeys, useModels, useProviders } from './shared'
+import {
+  useCodex,
+  useCodexUsage,
+  useInvalidateKeys,
+  useKeys,
+  useModels,
+  useProviders,
+} from './shared'
 
 /** Enough to work with for a day, small enough that forgetting it is not expensive. */
 const DEFAULT_CAP = '250'
@@ -18,6 +37,7 @@ export function Providers() {
   const models = useModels()
   const keys = useKeys()
   const codex = useCodex()
+  const codexUsage = useCodexUsage()
   const [adding, setAdding] = useState<LLMProvider | null>(null)
 
   if (providers.isError)
@@ -89,11 +109,20 @@ export function Providers() {
         ) : codex.isError ? (
           <ErrorNotice title="Could not check Codex" error={codex.error} />
         ) : codex.data.connected ? (
-          <div className="flex flex-wrap items-center gap-2 text-body">
-            <Badge>Connected</Badge>
-            <span className="text-ink-muted">
-              Uses your ChatGPT sign-in · GPT reasoning is fixed at Medium
-            </span>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2 text-body">
+              <Badge>Connected</Badge>
+              <span className="text-ink-muted">
+                Uses your ChatGPT sign-in · GPT reasoning is fixed at Medium
+              </span>
+            </div>
+            {codexUsage.isPending ? (
+              <Skeleton className="h-24" />
+            ) : codexUsage.isError ? (
+              <ErrorNotice title="Could not load Codex usage" error={codexUsage.error} />
+            ) : (
+              <CodexUsageCard usage={codexUsage.data} />
+            )}
           </div>
         ) : (
           <Notice tone="warn" title="Codex is not signed in with ChatGPT">
@@ -117,6 +146,65 @@ export function Providers() {
       )}
       <AddKeyDialog provider={adding} onClose={() => setAdding(null)} />
     </>
+  )
+}
+
+function UsageWindow({
+  label,
+  window,
+}: {
+  label: string
+  window: NonNullable<CodexUsage['primary']>
+}) {
+  const reset = window.resetsAt
+    ? fmt.dateTime(new Date(window.resetsAt * 1000).toISOString())
+    : null
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-hairline bg-canvas p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-body font-medium text-ink">{label}</span>
+        <span className="num text-body-compact text-ink-muted">
+          {fmt.int(window.remainingPercent)}% left
+        </span>
+      </div>
+      <Progress value={window.remainingPercent / 100} label={`${label} allowance remaining`} />
+      <span className="text-body-compact text-ink-subtle">
+        {fmt.int(window.usedPercent)}% used{reset ? ` · resets ${reset}` : ''}
+      </span>
+    </div>
+  )
+}
+
+function CodexUsageCard({ usage }: { usage: CodexUsage }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {usage.error && <Notice tone="warn" title={usage.error} />}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {usage.primary && <UsageWindow label="5-hour allowance" window={usage.primary} />}
+        {usage.secondary && <UsageWindow label="Weekly allowance" window={usage.secondary} />}
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric boxed label="Plan" value={usage.plan?.toUpperCase() ?? '—'} size="sm" />
+        <Metric boxed label="Harness calls" value={fmt.int(usage.localCalls)} size="sm" />
+        <Metric
+          boxed
+          label="Recorded tokens"
+          value={fmt.compact(usage.localTokens)}
+          hint={usage.localTokensComplete ? undefined : 'Recent Power Pool calls only'}
+          size="sm"
+        />
+        <Metric
+          boxed
+          label="Extra credits"
+          value={usage.hasCredits ? (usage.creditsBalance ?? 'Available') : 'None'}
+          size="sm"
+        />
+      </div>
+      <p className="text-body-compact text-pretty text-ink-subtle">
+        Account allowance is shared with Codex and other eligible agent features. Harness calls and
+        tokens count only requests saved by Alpha Harness.
+      </p>
+    </div>
   )
 }
 

@@ -1087,6 +1087,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm/codex/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codex Usage
+         * @description Official shared allowance plus calls recorded locally by Alpha Harness.
+         */
+        get: operations["codex_usage_api_llm_codex_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/prompts": {
         parameters: {
             query?: never;
@@ -2570,6 +2590,17 @@ export interface components {
             /** Updatedat */
             updatedAt: string | null;
         };
+        /** CodexRateWindow */
+        CodexRateWindow: {
+            /** Usedpercent */
+            usedPercent: number;
+            /** Remainingpercent */
+            remainingPercent: number;
+            /** Windowminutes */
+            windowMinutes: number | null;
+            /** Resetsat */
+            resetsAt: number | null;
+        };
         /** CodexStatus */
         CodexStatus: {
             /** Connected */
@@ -2583,6 +2614,29 @@ export interface components {
              * @constant
              */
             reasoningEffort: "medium";
+        };
+        /** CodexUsage */
+        CodexUsage: {
+            /** Connected */
+            connected: boolean;
+            /** Plan */
+            plan: string | null;
+            primary: components["schemas"]["CodexRateWindow"] | null;
+            secondary: components["schemas"]["CodexRateWindow"] | null;
+            /** Hascredits */
+            hasCredits: boolean;
+            /** Creditsbalance */
+            creditsBalance: string | null;
+            /** Resetcredits */
+            resetCredits: number;
+            /** Localcalls */
+            localCalls: number;
+            /** Localtokens */
+            localTokens: number;
+            /** Localtokenscomplete */
+            localTokensComplete: boolean;
+            /** Error */
+            error: string | null;
         };
         /** CorrelatedPair */
         CorrelatedPair: {
@@ -6451,6 +6505,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CodexStatus"];
+                };
+            };
+        };
+    };
+    codex_usage_api_llm_codex_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexUsage"];
                 };
             };
         };

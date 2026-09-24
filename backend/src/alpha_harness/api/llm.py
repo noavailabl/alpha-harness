@@ -10,8 +10,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
-from ..llm.keys import serialise
+from ..db.models import ChatMessage, Study
+from ..labs.params import POWER_POOL_SAMPLER
+from ..llm.codex_cli import CODEX_MODELS, LEGACY_MODEL_ID
+from ..llm.keys import LLMError, serialise
 from ..llm.prompts import PROMPTS
 from ..llm.providers import LLMProviders, catalogue
 from ..llm.registry import LLMModels
@@ -97,6 +101,27 @@ class CodexStatus(Out):
     reasoning_effort: Literal["medium"]
 
 
+class CodexRateWindow(Out):
+    used_percent: int
+    remaining_percent: int
+    window_minutes: int | None
+    resets_at: int | None
+
+
+class CodexUsage(Out):
+    connected: bool
+    plan: str | None
+    primary: CodexRateWindow | None
+    secondary: CodexRateWindow | None
+    has_credits: bool
+    credits_balance: str | None
+    reset_credits: int
+    local_calls: int
+    local_tokens: int
+    local_tokens_complete: bool
+    error: str | None
+
+
 def _check(result: dict[str, Any]) -> KeyWorks | KeyFailed:
     if result["ok"]:
         return KeyWorks.model_validate(result)
@@ -127,6 +152,108 @@ async def codex_status(state: State) -> CodexStatus:
         auth="ChatGPT" if connected else None,
         model=DEFAULT_MODEL_ID,
         reasoning_effort=MEDIUM_EFFORT,
+    )
+
+
+def _rate_window(value: Any) -> CodexRateWindow | None:
+    if not isinstance(value, dict) or "usedPercent" not in value:
+        return None
+    used = max(0, min(100, int(value["usedPercent"])))
+    return CodexRateWindow(
+        used_percent=used,
+        remaining_percent=100 - used,
+        window_minutes=(
+            int(value["windowDurationMins"])
+            if value.get("windowDurationMins") is not None
+            else None
+        ),
+        resets_at=int(value["resetsAt"]) if value.get("resetsAt") is not None else None,
+    )
+
+
+async def _local_codex_usage(state: Any) -> tuple[int, int, bool]:
+    model_ids = {LEGACY_MODEL_ID, *(model.id for model in CODEX_MODELS)}
+    calls = tokens = 0
+    complete = True
+    async with state.llm.db.session() as session:
+        messages = (
+            await session.scalars(
+                select(ChatMessage.meta).where(ChatMessage.role == "assistant")
+            )
+        ).all()
+        studies = (
+            await session.scalars(
+                select(Study.sampler_params).where(Study.sampler == POWER_POOL_SAMPLER)
+            )
+        ).all()
+    for meta in messages:
+        if str(meta.get("model") or "") in model_ids:
+            calls += 1
+            tokens += int(meta.get("tokens") or 0)
+    for params in studies:
+        if str(params.get("model") or "") not in model_ids:
+            continue
+        llm = params.get("llm") if isinstance(params.get("llm"), dict) else {}
+        history = params.get("calls") if isinstance(params.get("calls"), list) else []
+        task_calls = int(llm.get("calls") or 0)
+        calls += task_calls
+        tokens += sum(
+            int(entry.get("tokens") or 0) for entry in history if isinstance(entry, dict)
+        )
+        complete = complete and task_calls <= len(history)
+    return calls, tokens, complete
+
+
+@router.get("/codex/usage")
+async def codex_usage(state: State) -> CodexUsage:
+    """Official shared allowance plus calls recorded locally by Alpha Harness."""
+    local_calls, local_tokens, local_complete = await _local_codex_usage(state)
+    connected = await state.llm.codex.connected()
+    try:
+        snapshot = await state.llm.codex.usage()
+    except LLMError as exc:
+        return CodexUsage(
+            connected=connected,
+            plan=None,
+            primary=None,
+            secondary=None,
+            has_credits=False,
+            credits_balance=None,
+            reset_credits=0,
+            local_calls=local_calls,
+            local_tokens=local_tokens,
+            local_tokens_complete=local_complete,
+            error=str(exc),
+        )
+    buckets = snapshot.get("rateLimitsByLimitId")
+    candidate = buckets.get("codex") if isinstance(buckets, dict) else None
+    fallback = snapshot.get("rateLimits")
+    rate: dict[str, Any] = (
+        candidate if isinstance(candidate, dict) else fallback if isinstance(fallback, dict) else {}
+    )
+    raw_credit_status = rate.get("credits")
+    credit_status: dict[str, Any] = (
+        raw_credit_status if isinstance(raw_credit_status, dict) else {}
+    )
+    resets = snapshot.get("rateLimitResetCredits")
+    return CodexUsage(
+        connected=connected,
+        plan=str(rate.get("planType")) if rate.get("planType") else None,
+        primary=_rate_window(rate.get("primary")),
+        secondary=_rate_window(rate.get("secondary")),
+        has_credits=bool(credit_status.get("hasCredits")),
+        credits_balance=(
+            str(credit_status.get("balance"))
+            if credit_status.get("balance") is not None
+            else None
+        ),
+        reset_credits=(
+            int(resets.get("availableCount") or 0) if isinstance(resets, dict) else 0
+        ),
+        local_calls=local_calls,
+        local_tokens=local_tokens,
+        local_tokens_complete=local_complete,
+        error=None,
     )
 
 
