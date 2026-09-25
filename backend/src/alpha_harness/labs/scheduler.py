@@ -428,9 +428,9 @@ async def stop_task(optimizer: Optimizer, row: Study, *, force: bool = False) ->
     never resolves — holds the task RUNNING and its cores for good, with nothing on screen
     to press but the button that already did nothing.
 
-    So a forced stop cancels what it can on BRAIN, closes the trials whatever their
-    simulations are doing, and ends the task. Anything BRAIN keeps running still lands in
-    the vault; it simply stops holding a task open.
+    So a forced stop cancels what it can on BRAIN, closes the local simulation records and
+    trials whatever BRAIN is doing, and ends the task. If BRAIN later produces an Alpha after
+    refusing cancellation, Sync from BRAIN can recover it without holding local cores open.
     """
     async with optimizer.lock(row.id):
         await optimizer.engine.drop_queued(row.task)

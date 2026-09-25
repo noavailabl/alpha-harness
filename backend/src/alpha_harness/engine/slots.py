@@ -328,16 +328,15 @@ class BatchEngine:
         return dropped
 
     async def abandon(self, task: str) -> int:
-        """Cancel everything ``task`` still has out on BRAIN. Returns how many were asked.
+        """Cancel everything ``task`` still has out and release its local cores.
 
         Except a batch it opened that also carries another task's simulations: cancelling
         it would take theirs with it, so it is left to finish.
 
-        Best effort on purpose. A simulation BRAIN has already finished refuses to cancel,
-        and marking it cancelled here would hide an alpha that exists — so the refusal is
-        left to the next poll, which records what really happened. The *task* ends either
-        way: a task is a local scheduling object, and a simulation that outlives it still
-        lands in the vault with the quota it already spent.
+        Remote cancellation is best effort, but the second Stop press is definitive locally:
+        after asking BRAIN, every unshared row is closed even if BRAIN refuses or errors. A
+        result that lands remotely afterwards can be recovered by Sync from BRAIN; it must not
+        leave a stopped task occupying local cores forever.
         """
         async with self.db.session() as session:
             rows = list(
@@ -375,11 +374,14 @@ class BatchEngine:
         outcomes = await asyncio.gather(*(stop(r) for r in rows), return_exceptions=True)
         for record_id, outcome in zip(rows, outcomes, strict=True):
             if isinstance(outcome, BaseException):
-                # One refusal must not strand the rest; the poll records what really happened.
+                # One refusal must not strand the rest. The rows are closed locally below.
                 log.warning("engine.cancel_failed", record_id=record_id, error=str(outcome))
+        closed = await self.tracker.force_close(
+            rows,
+            message="Force-stopped locally after BRAIN did not acknowledge cancellation.",
+        )
         if rows:
-            log.info("engine.task_abandoned", task=task, count=len(rows))
-            await self.tracker.notify()
+            log.info("engine.task_abandoned", task=task, requested=len(rows), closed=closed)
         return len(rows)
 
     # -- quotas ----------------------------------------------------------

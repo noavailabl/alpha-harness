@@ -285,6 +285,37 @@ class SimulationTracker:
         self._next_poll.pop(record_id, None)
         return ok
 
+    async def force_close(self, record_ids: Iterable[int], *, message: str) -> int:
+        """Stop tracking active records after an explicit forced task stop.
+
+        BRAIN can refuse ``DELETE`` for a batch it has lost or can no longer inspect. A forced
+        stop is the user's instruction to release the local cores anyway. Shared batch parents
+        are excluded by the caller so closing these rows cannot interrupt another task.
+        """
+        ids = list(dict.fromkeys(record_ids))
+        if not ids:
+            return 0
+        async with self.db.session() as session:
+            result = await session.execute(
+                update(SimulationRecord)
+                .where(
+                    SimulationRecord.id.in_(ids),
+                    SimulationRecord.status.in_(ACTIVE),
+                )
+                .values(
+                    status=SimStatus.CANCELLED,
+                    finished_at=utcnow(),
+                    message=message,
+                )
+            )
+            closed = result.rowcount or 0  # pyright: ignore[reportAttributeAccessIssue]
+        for record_id in ids:
+            self._next_poll.pop(record_id, None)
+        if closed:
+            log.warning("sim.force_closed", count=closed)
+            await self.notify()
+        return closed
+
     # -- reads -----------------------------------------------------------
 
     async def get(self, record_id: int) -> SimulationRecord | None:
