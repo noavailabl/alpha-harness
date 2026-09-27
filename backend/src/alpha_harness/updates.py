@@ -34,7 +34,7 @@ from packaging.version import InvalidVersion, Version
 log = structlog.get_logger(__name__)
 
 PACKAGE = "alpha-harness"
-REPOSITORY = "residual-lab/alpha-harness"
+REPOSITORY = "noavailabl/alpha-harness"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 #: Where a person goes to fetch a release by hand, when the app cannot do it for them.
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"

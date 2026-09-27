@@ -8,3 +8,9 @@ This fork extends [Alpha Harness](https://github.com/residual-lab/alpha-harness)
 - **Reliable forced stops:** release local cores when BRAIN no longer acknowledges a task cancellation, while allowing later results to be recovered through Sync with BRAIN.
 
 Codex authentication stays in the local Codex sign-in. API keys, authentication tokens, cookies, BRAIN sessions, Alpha records, runtime databases, and log files are not included in this repository.
+
+## Install on Windows
+
+Download **AlphaHarness.exe** from the [latest release](https://github.com/noavailabl/alpha-harness/releases/latest) and run it. The first start installs everything it needs and opens Alpha Harness in your browser. Later starts only require opening the same executable.
+
+Windows may say the app is unrecognized because the executable is not code signed. Choose **More info**, then **Run anyway**.

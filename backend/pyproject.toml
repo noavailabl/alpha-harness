@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.12.13,<0.13.0" ]
 
 [project]
 name = "alpha-harness"
-version = "2026.9.24+codex.3"
+version = "0.0.0.dev0"
 description = "Local Research Studio for the WorldQuant BRAIN Platform"
 requires-python = ">=3.14"
 dependencies = [
