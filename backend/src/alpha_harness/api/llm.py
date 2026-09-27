@@ -177,9 +177,7 @@ async def _local_codex_usage(state: Any) -> tuple[int, int, bool]:
     complete = True
     async with state.llm.db.session() as session:
         messages = (
-            await session.scalars(
-                select(ChatMessage.meta).where(ChatMessage.role == "assistant")
-            )
+            await session.scalars(select(ChatMessage.meta).where(ChatMessage.role == "assistant"))
         ).all()
         studies = (
             await session.scalars(
@@ -197,9 +195,7 @@ async def _local_codex_usage(state: Any) -> tuple[int, int, bool]:
         history = params.get("calls") if isinstance(params.get("calls"), list) else []
         task_calls = int(llm.get("calls") or 0)
         calls += task_calls
-        tokens += sum(
-            int(entry.get("tokens") or 0) for entry in history if isinstance(entry, dict)
-        )
+        tokens += sum(int(entry.get("tokens") or 0) for entry in history if isinstance(entry, dict))
         complete = complete and task_calls <= len(history)
     return calls, tokens, complete
 
@@ -232,9 +228,7 @@ async def codex_usage(state: State) -> CodexUsage:
         candidate if isinstance(candidate, dict) else fallback if isinstance(fallback, dict) else {}
     )
     raw_credit_status = rate.get("credits")
-    credit_status: dict[str, Any] = (
-        raw_credit_status if isinstance(raw_credit_status, dict) else {}
-    )
+    credit_status: dict[str, Any] = raw_credit_status if isinstance(raw_credit_status, dict) else {}
     resets = snapshot.get("rateLimitResetCredits")
     return CodexUsage(
         connected=connected,
@@ -243,13 +237,9 @@ async def codex_usage(state: State) -> CodexUsage:
         secondary=_rate_window(rate.get("secondary")),
         has_credits=bool(credit_status.get("hasCredits")),
         credits_balance=(
-            str(credit_status.get("balance"))
-            if credit_status.get("balance") is not None
-            else None
+            str(credit_status.get("balance")) if credit_status.get("balance") is not None else None
         ),
-        reset_credits=(
-            int(resets.get("availableCount") or 0) if isinstance(resets, dict) else 0
-        ),
+        reset_credits=(int(resets.get("availableCount") or 0) if isinstance(resets, dict) else 0),
         local_calls=local_calls,
         local_tokens=local_tokens,
         local_tokens_complete=local_complete,

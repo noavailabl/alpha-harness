@@ -261,7 +261,7 @@ class CodexCLI:
             while line := await stdout.readline():
                 try:
                     message = json.loads(line)
-                except (ValueError, UnicodeDecodeError):
+                except ValueError, UnicodeDecodeError:
                     continue
                 if message.get("id") != 2:
                     continue
