@@ -53,6 +53,12 @@ def _environment() -> dict[str, str]:
     env = os.environ.copy()
     env.pop("OPENAI_API_KEY", None)
     env.pop("CODEX_API_KEY", None)
+    # The Windows desktop launcher can start the backend without HOME. Codex then fails
+    # before reading an otherwise valid ChatGPT login. Point it at the standard per-user
+    # credential directory without baking a machine-specific path into the integration.
+    if sys.platform == "win32" and not env.get("CODEX_HOME"):
+        if profile := env.get("USERPROFILE"):
+            env["CODEX_HOME"] = str(Path(profile) / ".codex")
     return env
 
 
