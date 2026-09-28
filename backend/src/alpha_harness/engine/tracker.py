@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from datetime import UTC
+from datetime import UTC, timedelta
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -63,6 +63,10 @@ DEFAULT_POLL_SECONDS = 3.0
 PENDING_GRACE_SECONDS = 120.0
 #: How often stale sends are looked for after startup.
 SWEEP_SECONDS = 60.0
+#: A batch whose reported progress does not move for this long has stopped being useful.
+#: BRAIN normally advances a batch within minutes; two hours leaves plenty of room for a
+#: slow market while preventing an interrupted machine from losing every local core forever.
+STALLED_BATCH_AGE = timedelta(hours=2)
 
 
 class SimulationTracker:
@@ -76,6 +80,7 @@ class SimulationTracker:
         on_change: Callable[[list[dict[str, Any]]], Awaitable[None]],
         on_unauthorized: Callable[[], Awaitable[bool]],
         on_alpha: Callable[[str], Awaitable[None]],
+        on_stalled: Callable[[str], Awaitable[None]],
     ) -> None:
         self.db = db
         self.endpoints = endpoints
@@ -87,6 +92,9 @@ class SimulationTracker:
         #: and its daily returns without anyone asking. Failures inside it never affect the
         #: simulation that produced the alpha.
         self._on_alpha = on_alpha
+        #: Pauses the owning lab task and removes work it has not sent before a stalled
+        #: BRAIN batch is closed locally.
+        self._on_stalled = on_stalled
         self._task: asyncio.Task[None] | None = None
         # record_id -> monotonic time of the next allowed poll. In memory only; losing
         # it just means we poll once immediately after a restart.
@@ -285,7 +293,13 @@ class SimulationTracker:
         self._next_poll.pop(record_id, None)
         return ok
 
-    async def force_close(self, record_ids: Iterable[int], *, message: str) -> int:
+    async def force_close(
+        self,
+        record_ids: Iterable[int],
+        *,
+        message: str,
+        status: SimStatus = SimStatus.CANCELLED,
+    ) -> int:
         """Stop tracking active records after an explicit forced task stop.
 
         BRAIN can refuse ``DELETE`` for a batch it has lost or can no longer inspect. A forced
@@ -303,7 +317,7 @@ class SimulationTracker:
                     SimulationRecord.status.in_(ACTIVE),
                 )
                 .values(
-                    status=SimStatus.CANCELLED,
+                    status=status,
                     finished_at=utcnow(),
                     message=message,
                 )
@@ -516,26 +530,85 @@ class SimulationTracker:
             case "retry":
                 # A 403, 429 or 5xx is not a result: treating it as one would close a
                 # running simulation with no alpha and stop polling it.
+                if await self._close_if_stalled(record):
+                    return True
                 log.warning("sim.poll_error", record_id=record.id, status=response.status)
                 self._next_poll[record.id] = time.monotonic() + (outcome.delay or 15.0)
                 return False
             case "pending":
-                self._next_poll[record.id] = time.monotonic() + (
-                    outcome.delay or DEFAULT_POLL_SECONDS
-                )
                 if outcome.progress is None or outcome.progress == record.progress:
+                    if await self._close_if_stalled(record):
+                        return True
+                    self._next_poll[record.id] = time.monotonic() + (
+                        outcome.delay or DEFAULT_POLL_SECONDS
+                    )
                     return False
                 async with self.db.session() as session:
                     await session.execute(
                         update(SimulationRecord)
                         .where(SimulationRecord.id == record.id)
-                        .values(progress=outcome.progress)
+                        .values(progress=outcome.progress, last_polled_at=utcnow())
                     )
+                self._next_poll[record.id] = time.monotonic() + (
+                    outcome.delay or DEFAULT_POLL_SECONDS
+                )
                 return True
             case "fanout":
                 return await self._hand_over_children(record, outcome)
             case "gone" | "finished":
                 return await self._apply_terminal(record, outcome)
+
+    async def _close_if_stalled(self, record: SimulationRecord) -> bool:
+        """Pause and release a batch BRAIN has left unchanged for two hours.
+
+        ``last_polled_at`` is the last time progress changed. Older rows predate that use,
+        so their submission time is the conservative fallback. A current BRAIN response is
+        required before reaching this method; time spent offline alone never closes work.
+        """
+        if not record.is_batch or record.parent_record_id is not None:
+            return False
+        anchor = record.last_polled_at or record.submitted_at or record.created_at
+        if utcnow() - anchor < STALLED_BATCH_AGE:
+            return False
+
+        await self._on_stalled(record.task)
+        acknowledged = False
+        try:
+            acknowledged = await self.endpoints.cancel_simulation(record.platform_id or "")
+        except BrainError as exc:
+            log.warning(
+                "sim.stalled_cancel_failed",
+                record_id=record.id,
+                platform_id=record.platform_id,
+                error=str(exc),
+            )
+
+        async with self.db.session() as session:
+            children = list(
+                (
+                    await session.scalars(
+                        select(SimulationRecord.id).where(
+                            SimulationRecord.parent_record_id == record.id,
+                            SimulationRecord.status.in_(ACTIVE),
+                        )
+                    )
+                ).all()
+            )
+        message = (
+            "BRAIN reported no progress for two hours. The batch was closed locally and "
+            "its task was paused; Sync with BRAIN can recover results that arrive later."
+        )
+        closed = await self.force_close(
+            [record.id, *children], message=message, status=SimStatus.TIMEOUT
+        )
+        log.warning(
+            "sim.stalled_closed",
+            record_id=record.id,
+            platform_id=record.platform_id,
+            cancelled=acknowledged,
+            closed=closed,
+        )
+        return bool(closed)
 
     async def _hand_over_children(self, record: SimulationRecord, outcome: Outcome) -> bool:
         """A multi-simulation has dispatched its children: the engine reads them from here.

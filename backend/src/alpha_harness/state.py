@@ -24,10 +24,11 @@ from .catalog.queries import CatalogQueries
 from .catalog.sync import CatalogSync, serialise_run
 from .config import BRAIN_API_BASE, Settings
 from .db.duck import Catalog
-from .db.models import SimStatus, SimulationRecord, utcnow
+from .db.models import SimStatus, SimulationRecord, Study, StudyStatus, utcnow
 from .db.sqlite import Database
 from .engine.slots import BatchEngine
 from .engine.tracker import SimulationTracker
+from .labs import scheduler
 from .labs.study import Optimizer
 from .llm.chat import ChatService
 from .llm.registry import ModelRegistry
@@ -90,6 +91,7 @@ class AppState:
             on_change=lambda payload: self.hub.broadcast(TOPIC_SIMULATIONS, payload),
             on_unauthorized=self.renew_session,
             on_alpha=self.backfill.capture,
+            on_stalled=self._pause_stalled_task,
         )
         self.engine = BatchEngine(
             self.db, self.endpoints, self.tracker, on_unauthorized=self.renew_session
@@ -120,6 +122,22 @@ class AppState:
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")
         self._last_login_attempt = float("-inf")
+
+    async def _pause_stalled_task(self, task: str) -> None:
+        """Stop a stalled batch's task from replacing it with more work."""
+        async with self.db.session() as session:
+            rows = list((await session.scalars(select(Study).where(Study.task == task))).all())
+        for row in rows:
+            async with self.optimizer.lock(row.id):
+                current = await self.optimizer.get(row.id)
+                if current is None:
+                    continue
+                if current.status in (StudyStatus.RUNNING, StudyStatus.QUEUED):
+                    await self.optimizer.set_status(row.id, StudyStatus.PAUSED)
+                await self.engine.drop_queued(task)
+                await scheduler.prune_unsent(self.optimizer, row.id)
+        await scheduler.start_waiting(self.optimizer)
+        await self.optimizer.notify()
 
     # -- lifecycle -------------------------------------------------------
 

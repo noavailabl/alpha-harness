@@ -11,8 +11,9 @@ running alphas every day.
 - **Codex usage visibility:** see your shared ChatGPT allowance and reset time, together with
   the calls and tokens recorded locally by Alpha Harness.
 - **Visible Alpha IDs:** see the Alpha ID directly in the Submittable Alphas table.
-- **More reliable forced stops:** free local cores when BRAIN does not acknowledge a cancelled
-  task. If BRAIN finishes something later, Sync with BRAIN can still recover the result.
+- **Stuck batch recovery:** if a BRAIN batch makes no progress for two hours, Alpha Harness asks
+  BRAIN to cancel it, frees the local cores, and keeps the task paused. If BRAIN finishes
+  something later, Sync with BRAIN can still recover the result.
 
 ## Download and install on Windows
 

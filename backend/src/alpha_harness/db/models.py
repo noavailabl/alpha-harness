@@ -197,6 +197,8 @@ class SimulationRecord(Base):
     #: which can be hours earlier. Bounds the search for a send whose answer was lost.
     sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    #: Last time BRAIN reported different progress. A long unchanged interval lets restart
+    #: recovery release a batch the platform has left stuck indefinitely.
     last_polled_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     __table_args__ = (
