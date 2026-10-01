@@ -18,6 +18,8 @@ export type LLMKey = Schemas['LLMKey']
 export type LLMKeyStatus = Schemas['LLMKeyStatus']
 export type CodexStatus = Schemas['CodexStatus']
 export type CodexUsage = Schemas['CodexUsage']
+export type ClaudeStatus = Schemas['ClaudeStatus']
+export type ClaudeUsage = Schemas['ClaudeUsage']
 
 export interface AddKeyRequest {
   key: string
@@ -76,6 +78,10 @@ export interface DownloadedScope {
 export const llm = {
   codex: () => http.get<CodexStatus>('/api/llm/codex'),
   codexUsage: () => http.get<CodexUsage>('/api/llm/codex/usage'),
+  claude: () => http.get<ClaudeStatus>('/api/llm/claude'),
+  /** `refresh` spends one tiny Haiku request to read the allowance now. */
+  claudeUsage: (refresh = false) =>
+    http.get<ClaudeUsage>(`/api/llm/claude/usage${refresh ? '?refresh=true' : ''}`),
   providers: () => http.get<LLMProvidersResponse>('/api/llm/providers'),
   models: () => http.get<LLMModels>('/api/llm/models'),
   keys: () => http.get<LLMKeyStatus>('/api/llm/keys'),

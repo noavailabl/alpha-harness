@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from ..db.models import ChatMessage, ChatThread, utcnow
 from .prompts import ASSISTANT
+from .registry import SUBSCRIPTION
 from .text import clip, loads_or
 
 if TYPE_CHECKING:
@@ -202,7 +203,9 @@ class ChatService:
         )
         answered_by = self.llm.registry.get(answer.model)
         effective_reasoning: Reasoning = (
-            "careful" if answered_by is not None and answered_by.provider == "codex" else reasoning
+            "careful"
+            if answered_by is not None and answered_by.provider in SUBSCRIPTION
+            else reasoning
         )
 
         parsed = _parse(answer.text)

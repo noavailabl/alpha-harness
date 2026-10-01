@@ -64,6 +64,23 @@ def _environment() -> dict[str, str]:
     return env
 
 
+def _executable() -> str | None:
+    """Find either a regular Codex CLI install or Codex Desktop's bundled CLI."""
+    if executable := shutil.which("codex"):
+        return executable
+    if sys.platform != "win32":
+        return None
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    bundled = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
+    try:
+        candidates = tuple(bundled.glob("*/codex.exe"))
+        return str(max(candidates, key=lambda path: path.stat().st_mtime)) if candidates else None
+    except OSError:
+        return None
+
+
 def _schema(value: dict[str, Any]) -> dict[str, Any]:
     """Make the app's schemas strict enough for Codex structured output."""
     result = {k: v for k, v in value.items() if k not in {"minItems", "maxItems"}}
@@ -110,7 +127,7 @@ class CodexCLI:
 
     @staticmethod
     def executable() -> str | None:
-        return shutil.which("codex")
+        return _executable()
 
     async def connected(self, *, refresh: bool = False) -> bool:
         async with self._lock:

@@ -21,7 +21,7 @@ import { Budget } from './budget'
 import { Keys } from './keys'
 import { Prompts } from './prompts'
 import { Providers } from './providers'
-import { useCodex, useKeys } from './shared'
+import { useClaude, useCodex, useKeys } from './shared'
 
 const SCREENS = { keys: Keys, budget: Budget, prompts: Prompts } as const
 
@@ -29,10 +29,14 @@ export function AiScreen() {
   const params = useParams({ strict: false })
   const keys = useKeys()
   const codex = useCodex()
+  const claude = useClaude()
   const threadId = params.threadId ? Number(params.threadId) || null : null
   const tab = params.threadId ? 'assistant' : params.tab
   const Screen = tab && tab in SCREENS ? SCREENS[tab as keyof typeof SCREENS] : null
-  const hasAssistant = (keys.data?.keys.length ?? 0) > 0 || codex.data?.connected === true
+  const hasAssistant =
+    (keys.data?.keys.length ?? 0) > 0 ||
+    codex.data?.connected === true ||
+    claude.data?.connected === true
 
   // Every branch keeps its slot, so the provider grid (and its open popup) stays mounted when
   // the first key lands and the tab bar appears above it.
@@ -49,7 +53,7 @@ export function AiScreen() {
           ))}
         </TabBar>
       )}
-      {keys.isPending || codex.isPending ? (
+      {keys.isPending || codex.isPending || claude.isPending ? (
         <Skeleton className="h-64" />
       ) : !hasAssistant || tab === 'providers' ? (
         <Providers />

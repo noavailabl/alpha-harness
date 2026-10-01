@@ -140,6 +140,10 @@ BUILTIN: tuple[ModelInfo, ...] = (
 #: row, so an unknown model cannot silently burn a day's quota.
 UNKNOWN_LIMITS = {"rpm": 5, "tpm": 250_000, "rpd": 20}
 
+#: Providers reached through a local CLI signed in to a subscription, not an API key.
+#: Their models run at a fixed Medium effort and have no per-key daily budget here.
+SUBSCRIPTION = frozenset({"codex", "claude"})
+
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 #: For a single hard question where quality matters more than the daily budget.
 DEEP_MODEL = "gemini-3.8-flash"
@@ -167,6 +171,23 @@ class ModelRegistry:
                     label=model.label,
                     kind="text",
                     provider="codex",
+                    rpm=60,
+                    tpm=1_000_000,
+                    rpd=1_000_000,
+                    bulk=True,
+                ),
+            )
+
+        from .claude_cli import CLAUDE_MODELS
+
+        for model in CLAUDE_MODELS:
+            self._models.setdefault(
+                model.id,
+                ModelInfo(
+                    id=model.id,
+                    label=model.label,
+                    kind="text",
+                    provider="claude",
                     rpm=60,
                     tpm=1_000_000,
                     rpd=1_000_000,

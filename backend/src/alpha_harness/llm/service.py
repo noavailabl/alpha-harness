@@ -21,6 +21,7 @@ from openai import DefaultAsyncHttpxClient
 
 from ..schemas import camel_dict
 from .budget import Ledger
+from .claude_cli import ClaudeCLI
 from .codex_cli import DEFAULT_MODEL_ID as CODEX_DEFAULT_MODEL
 from .codex_cli import LEGACY_MODEL_ID, CodexCLI
 from .keys import BudgetExhaustedError, KeyStore, LLMError
@@ -136,6 +137,7 @@ class LLMService:
         self.ledger = Ledger(db)
         self.keys = KeyStore(db, sealer, self.ledger)
         self.codex = CodexCLI()
+        self.claude = ClaudeCLI()
         self._http = DefaultAsyncHttpxClient(
             timeout=TIMEOUT_SECONDS, limits=httpx2.Limits(keepalive_expiry=KEEPALIVE_SECONDS)
         )
@@ -191,6 +193,21 @@ class LLMService:
                 output_tokens=reply.output_tokens,
                 thinking_tokens=0,
                 total_tokens=reply.total_tokens,
+            )
+        if model.provider == "claude":
+            answer = await self.claude.generate(
+                system,
+                user,
+                model=model.id,
+                schema=response_schema,
+            )
+            return Answer(
+                text=answer.text,
+                model=model.id,
+                prompt_tokens=answer.prompt_tokens,
+                output_tokens=answer.output_tokens,
+                thinking_tokens=0,
+                total_tokens=answer.total_tokens,
             )
         estimate = estimate_tokens(system) + estimate_tokens(user)
         if estimate > model.tpm:

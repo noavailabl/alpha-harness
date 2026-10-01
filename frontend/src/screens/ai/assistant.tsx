@@ -37,13 +37,14 @@ import {
 import { Confirm, Select } from '@/ui/overlay'
 import { SplitPane } from '@/ui/panels'
 import { ScopePicker } from '@/ui/scope-picker'
-import { useCodex, useKeys } from './shared'
+import { useClaude, useCodex, useKeys } from './shared'
 
 export function Assistant({ threadId }: { threadId: number | null }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const keys = useKeys()
   const codex = useCodex()
+  const claude = useClaude()
   const options = useQuery({
     queryKey: ['ai', 'chat', 'options'],
     queryFn: chat.options,
@@ -78,6 +79,7 @@ export function Assistant({ threadId }: { threadId: number | null }) {
 
   const enabledProviders = new Set(keys.data?.keys.filter((k) => k.enabled).map((k) => k.provider))
   if (codex.data?.connected) enabledProviders.add('codex')
+  if (claude.data?.connected) enabledProviders.add('claude')
   const modelItems = (options.data?.models.models ?? [])
     .filter((m) => m.kind !== 'embedding' && enabledProviders.has(m.provider))
     .map((m) => ({
@@ -85,16 +87,19 @@ export function Assistant({ threadId }: { threadId: number | null }) {
       label:
         m.provider === 'codex'
           ? `${m.label} · Medium · ChatGPT allowance`
-          : `${m.label} · ${m.provider}`,
+          : m.provider === 'claude'
+            ? `${m.label} · Medium · Claude allowance`
+            : `${m.label} · ${m.provider}`,
     }))
   const defaultModel = options.data?.models.defaults.chat
   const modelValue =
     (model && modelItems.some((m) => m.value === model) ? model : null) ??
     (modelItems.some((m) => m.value === defaultModel) ? defaultModel : modelItems[0]?.value) ??
     null
-  const gptSelected =
-    options.data?.models.models.find((m) => m.id === modelValue)?.provider === 'codex'
-  const reasoningValue = gptSelected
+  const selectedProvider = options.data?.models.models.find((m) => m.id === modelValue)?.provider
+  // Subscription models run at a fixed Medium effort, so the reasoning choice is pinned.
+  const fixedEffort = selectedProvider === 'codex' || selectedProvider === 'claude'
+  const reasoningValue = fixedEffort
     ? 'careful'
     : (reasoning ?? options.data?.defaultReasoning ?? 'normal')
   const reasoningHelp = options.data?.reasoning.find((r) => r.value === reasoningValue)?.description
@@ -160,8 +165,8 @@ export function Assistant({ threadId }: { threadId: number | null }) {
 
   if (keys.isError) return <ErrorNotice title="Could not load the Keys" error={keys.error} />
   if (codex.isError) return <ErrorNotice title="Could not check Codex" error={codex.error} />
-  if (!keys.data || !codex.data) return <Skeleton className="h-96" />
-  if (keys.data.enabled === 0 && !codex.data.connected) {
+  if (!keys.data || !codex.data || claude.isPending) return <Skeleton className="h-96" />
+  if (keys.data.enabled === 0 && !codex.data.connected && !claude.data?.connected) {
     return (
       <Panel>
         <Empty title="The assistant needs a Key">
@@ -353,7 +358,7 @@ export function Assistant({ threadId }: { threadId: number | null }) {
               <Select
                 label="Reasoning"
                 items={
-                  gptSelected
+                  fixedEffort
                     ? [{ value: 'careful', label: 'Medium (fixed)' }]
                     : (options.data?.reasoning ?? []).map((r) => ({
                         value: r.value,
@@ -362,7 +367,7 @@ export function Assistant({ threadId }: { threadId: number | null }) {
                 }
                 value={reasoningValue}
                 onChange={setReasoning}
-                disabled={say.isPending || gptSelected}
+                disabled={say.isPending || fixedEffort}
               />
               <span className="ml-auto hidden items-center gap-1 sm:inline-flex">
                 <Kbd>Ctrl</Kbd>

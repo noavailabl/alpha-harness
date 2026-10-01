@@ -13,6 +13,15 @@ export const useCodexUsage = () =>
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
+export const useClaude = () =>
+  useQuery({ queryKey: ['ai', 'claude'], queryFn: llm.claude, staleTime: 30_000 })
+export const useClaudeUsage = () =>
+  useQuery({
+    queryKey: ['ai', 'claude', 'usage'],
+    queryFn: () => llm.claudeUsage(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
 export const useProviders = () =>
   useQuery({
     queryKey: ['ai', 'providers'],

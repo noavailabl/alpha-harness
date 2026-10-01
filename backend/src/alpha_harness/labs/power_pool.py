@@ -21,6 +21,7 @@ from ..brain.schemas import REGION_AGNOSTIC_REGION, SimulationSettings
 from ..db.models import Study, StudyStatus, Trial, TrialState, utcnow
 from ..llm.keys import BudgetExhaustedError, LLMError
 from ..llm.prompts import POWER_POOL_LAB
+from ..llm.registry import SUBSCRIPTION
 from ..llm.text import FENCE
 from ..tasks import spawn
 from . import scheduler, search
@@ -443,7 +444,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
             "at": utcnow().isoformat(),
             "dataset": dataset,
             "model": model.id,
-            "effort": "medium" if model.provider == "codex" else run.effort,
+            "effort": "medium" if model.provider in SUBSCRIPTION else run.effort,
             "fields": shown,
         }
         items: list[dict[str, Any]] = []

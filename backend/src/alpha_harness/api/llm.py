@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from ..db.models import ChatMessage, Study
 from ..labs.params import POWER_POOL_SAMPLER
+from ..llm.claude_cli import CLAUDE_MODELS
 from ..llm.codex_cli import CODEX_MODELS, LEGACY_MODEL_ID
 from ..llm.keys import LLMError, serialise
 from ..llm.prompts import PROMPTS
@@ -122,6 +123,37 @@ class CodexUsage(Out):
     error: str | None
 
 
+class ClaudeStatus(Out):
+    connected: bool
+    installed: bool
+    auth: str | None
+    plan: str | None
+    email: str | None
+    model: str
+    reasoning_effort: Literal["medium"]
+
+
+class ClaudeRateWindow(Out):
+    used_percent: int
+    remaining_percent: int
+    resets_at: int | None
+
+
+class ClaudeUsage(Out):
+    connected: bool
+    #: "allowed", "allowed_warning" or "rejected", as the CLI last reported it.
+    status: str | None
+    five_hour: ClaudeRateWindow | None
+    seven_day: ClaudeRateWindow | None
+    using_overage: bool
+    #: Epoch seconds when the snapshot arrived; null until a call has been made.
+    observed_at: int | None
+    local_calls: int
+    local_tokens: int
+    local_tokens_complete: bool
+    error: str | None
+
+
 def _check(result: dict[str, Any]) -> KeyWorks | KeyFailed:
     if result["ok"]:
         return KeyWorks.model_validate(result)
@@ -172,7 +204,10 @@ def _rate_window(value: Any) -> CodexRateWindow | None:
 
 
 async def _local_codex_usage(state: Any) -> tuple[int, int, bool]:
-    model_ids = {LEGACY_MODEL_ID, *(model.id for model in CODEX_MODELS)}
+    return await _local_usage(state, {LEGACY_MODEL_ID, *(model.id for model in CODEX_MODELS)})
+
+
+async def _local_usage(state: Any, model_ids: set[str]) -> tuple[int, int, bool]:
     calls = tokens = 0
     complete = True
     async with state.llm.db.session() as session:
@@ -244,6 +279,82 @@ async def codex_usage(state: State) -> CodexUsage:
         local_tokens=local_tokens,
         local_tokens_complete=local_complete,
         error=None,
+    )
+
+
+@router.get("/claude")
+async def claude_status(state: State) -> ClaudeStatus:
+    """Whether the local Claude Code CLI can use the signed-in Claude subscription."""
+    from ..llm.claude_cli import DEFAULT_MODEL_ID, MEDIUM_EFFORT
+
+    claude = state.llm.claude
+    connected = await claude.connected()
+    status = claude.status
+    plan = status.get("subscriptionType") or status.get("subscription")
+    return ClaudeStatus(
+        connected=connected,
+        installed=claude.executable() is not None,
+        auth="Claude subscription" if connected else None,
+        plan=str(plan) if plan else None,
+        email=str(status["email"]) if status.get("email") else None,
+        model=DEFAULT_MODEL_ID,
+        reasoning_effort=MEDIUM_EFFORT,
+    )
+
+
+def _claude_window(value: Any) -> ClaudeRateWindow | None:
+    if not isinstance(value, dict) or value.get("utilization") is None:
+        return None
+    raw = float(value["utilization"])
+    # The CLI reports a fraction; tolerate a percentage too.
+    used = max(0, min(100, round(raw * 100 if raw <= 1 else raw)))
+    return ClaudeRateWindow(
+        used_percent=used,
+        remaining_percent=100 - used,
+        resets_at=int(value["resetsAt"]) if value.get("resetsAt") is not None else None,
+    )
+
+
+@router.get("/claude/usage")
+async def claude_usage(state: State, refresh: bool = False) -> ClaudeUsage:
+    """The plan's allowance as the last Claude call reported it, plus local records.
+
+    ``refresh`` spends one tiny Haiku request to read it now.
+    """
+    claude = state.llm.claude
+    local_calls, local_tokens, local_complete = await _local_usage(
+        state, {model.id for model in CLAUDE_MODELS}
+    )
+    connected = await claude.connected()
+    error = None
+    if refresh or (connected and claude.limits is None and not claude.probed):
+        try:
+            await claude.probe()
+        except LLMError as exc:
+            error = str(exc)
+    limits: dict[str, Any] = claude.limits or {}
+    raw_windows = limits.get("unifiedWindows")
+    windows: dict[str, Any] = raw_windows if isinstance(raw_windows, dict) else {}
+    five = windows.get("five_hour")
+    seven = windows.get("seven_day")
+    # Older CLIs report only the window that is binding right now.
+    if five is None and seven is None and limits.get("utilization") is not None:
+        single = {"utilization": limits["utilization"], "resetsAt": limits.get("resetsAt")}
+        if limits.get("rateLimitType") == "seven_day":
+            seven = single
+        else:
+            five = single
+    return ClaudeUsage(
+        connected=connected,
+        status=str(limits["status"]) if limits.get("status") else None,
+        five_hour=_claude_window(five),
+        seven_day=_claude_window(seven),
+        using_overage=bool(limits.get("isUsingOverage")),
+        observed_at=int(claude.limits_at) if claude.limits_at else None,
+        local_calls=local_calls,
+        local_tokens=local_tokens,
+        local_tokens_complete=local_complete,
+        error=error,
     )
 
 

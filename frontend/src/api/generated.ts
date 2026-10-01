@@ -962,6 +962,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm/claude": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claude Status
+         * @description Whether the local Claude Code CLI can use the signed-in Claude subscription.
+         */
+        get: operations["claude_status_api_llm_claude_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/claude/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claude Usage
+         * @description The plan's allowance as the last Claude call reported it, plus local records.
+         *
+         *     ``refresh`` spends one tiny Haiku request to read it now.
+         */
+        get: operations["claude_usage_api_llm_claude_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/codex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codex Status
+         * @description Whether the local Codex CLI can use the signed-in ChatGPT allowance.
+         */
+        get: operations["codex_status_api_llm_codex_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/codex/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codex Usage
+         * @description Official shared allowance plus calls recorded locally by Alpha Harness.
+         */
+        get: operations["codex_usage_api_llm_codex_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/keys": {
         parameters: {
             query?: never;
@@ -1059,46 +1141,6 @@ export interface paths {
          *     rather than sitting in a help page.
          */
         get: operations["models_api_llm_models_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/llm/codex": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Codex Status
-         * @description Whether the local Codex CLI can use the signed-in ChatGPT allowance.
-         */
-        get: operations["codex_status_api_llm_codex_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/llm/codex/usage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Codex Usage
-         * @description Official shared allowance plus calls recorded locally by Alpha Harness.
-         */
-        get: operations["codex_usage_api_llm_codex_usage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2590,23 +2632,73 @@ export interface components {
             /** Updatedat */
             updatedAt: string | null;
         };
-        /** CodexRateWindow */
-        CodexRateWindow: {
-            /** Usedpercent */
-            usedPercent: number;
+        /** ClaudeRateWindow */
+        ClaudeRateWindow: {
             /** Remainingpercent */
             remainingPercent: number;
-            /** Windowminutes */
-            windowMinutes: number | null;
             /** Resetsat */
             resetsAt: number | null;
+            /** Usedpercent */
+            usedPercent: number;
+        };
+        /** ClaudeStatus */
+        ClaudeStatus: {
+            /** Auth */
+            auth: string | null;
+            /** Connected */
+            connected: boolean;
+            /** Email */
+            email: string | null;
+            /** Installed */
+            installed: boolean;
+            /** Model */
+            model: string;
+            /** Plan */
+            plan: string | null;
+            /**
+             * Reasoningeffort
+             * @constant
+             */
+            reasoningEffort: "medium";
+        };
+        /** ClaudeUsage */
+        ClaudeUsage: {
+            /** Connected */
+            connected: boolean;
+            /** Error */
+            error: string | null;
+            fiveHour: components["schemas"]["ClaudeRateWindow"] | null;
+            /** Localcalls */
+            localCalls: number;
+            /** Localtokens */
+            localTokens: number;
+            /** Localtokenscomplete */
+            localTokensComplete: boolean;
+            /** Observedat */
+            observedAt: number | null;
+            sevenDay: components["schemas"]["ClaudeRateWindow"] | null;
+            /** Status */
+            status: string | null;
+            /** Usingoverage */
+            usingOverage: boolean;
+        };
+        /** CodexRateWindow */
+        CodexRateWindow: {
+            /** Remainingpercent */
+            remainingPercent: number;
+            /** Resetsat */
+            resetsAt: number | null;
+            /** Usedpercent */
+            usedPercent: number;
+            /** Windowminutes */
+            windowMinutes: number | null;
         };
         /** CodexStatus */
         CodexStatus: {
-            /** Connected */
-            connected: boolean;
             /** Auth */
             auth: string | null;
+            /** Connected */
+            connected: boolean;
             /** Model */
             model: string;
             /**
@@ -2619,24 +2711,24 @@ export interface components {
         CodexUsage: {
             /** Connected */
             connected: boolean;
-            /** Plan */
-            plan: string | null;
-            primary: components["schemas"]["CodexRateWindow"] | null;
-            secondary: components["schemas"]["CodexRateWindow"] | null;
-            /** Hascredits */
-            hasCredits: boolean;
             /** Creditsbalance */
             creditsBalance: string | null;
-            /** Resetcredits */
-            resetCredits: number;
+            /** Error */
+            error: string | null;
+            /** Hascredits */
+            hasCredits: boolean;
             /** Localcalls */
             localCalls: number;
             /** Localtokens */
             localTokens: number;
             /** Localtokenscomplete */
             localTokensComplete: boolean;
-            /** Error */
-            error: string | null;
+            /** Plan */
+            plan: string | null;
+            primary: components["schemas"]["CodexRateWindow"] | null;
+            /** Resetcredits */
+            resetCredits: number;
+            secondary: components["schemas"]["CodexRateWindow"] | null;
         };
         /** CorrelatedPair */
         CorrelatedPair: {
@@ -3624,6 +3716,8 @@ export interface components {
         };
         /** PowerPoolModel */
         PowerPoolModel: {
+            /** Effort */
+            effort?: string | null;
             /** Id */
             id: string;
             /** Label */
@@ -3634,8 +3728,6 @@ export interface components {
             remainingToday: number | null;
             /** Tpm */
             tpm: number;
-            /** Effort */
-            effort?: string | null;
         };
         /** PowerPoolOptions */
         PowerPoolOptions: {
@@ -3648,10 +3740,14 @@ export interface components {
         };
         /** PowerPoolPreview */
         PowerPoolPreview: {
+            /** Effort */
+            effort: string | null;
             /** Fields */
             fields: number;
             /** Llmcalls */
             llmCalls: number;
+            /** Model */
+            model: string;
             /** Neutralizations */
             neutralizations: string[];
             /** Problems */
@@ -3661,10 +3757,6 @@ export interface components {
             universes: string[];
             /** Warnings */
             warnings: string[];
-            /** Model */
-            model: string;
-            /** Effort */
-            effort: string | null;
         };
         /** PowerPoolPrompt */
         PowerPoolPrompt: {
@@ -6301,6 +6393,97 @@ export interface operations {
             };
         };
     };
+    claude_status_api_llm_claude_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeStatus"];
+                };
+            };
+        };
+    };
+    claude_usage_api_llm_claude_usage_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeUsage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    codex_status_api_llm_codex_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexStatus"];
+                };
+            };
+        };
+    };
+    codex_usage_api_llm_codex_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexUsage"];
+                };
+            };
+        };
+    };
     list_keys_api_llm_keys_get: {
         parameters: {
             query?: never;
@@ -6485,46 +6668,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LLMModels"];
-                };
-            };
-        };
-    };
-    codex_status_api_llm_codex_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CodexStatus"];
-                };
-            };
-        };
-    };
-    codex_usage_api_llm_codex_usage_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CodexUsage"];
                 };
             };
         };

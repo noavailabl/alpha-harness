@@ -1,11 +1,17 @@
 /** Providers as cards: pick one, then add its free API key in a popup. */
 
-import { useMutation } from '@tanstack/react-query'
-import { ExternalLinkIcon, PlusIcon } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { ExternalLinkIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { fmt } from '@/lib/format'
-import { type CodexUsage, type LLMKey, type LLMProvider, llm } from '@/screens/ai/api'
+import {
+  type ClaudeUsage,
+  type CodexUsage,
+  type LLMKey,
+  type LLMProvider,
+  llm,
+} from '@/screens/ai/api'
 import {
   Badge,
   Button,
@@ -21,6 +27,8 @@ import {
 } from '@/ui/kit'
 import { Dialog } from '@/ui/overlay'
 import {
+  useClaude,
+  useClaudeUsage,
   useCodex,
   useCodexUsage,
   useInvalidateKeys,
@@ -38,6 +46,8 @@ export function Providers() {
   const keys = useKeys()
   const codex = useCodex()
   const codexUsage = useCodexUsage()
+  const claude = useClaude()
+  const claudeUsage = useClaudeUsage()
   const [adding, setAdding] = useState<LLMProvider | null>(null)
 
   if (providers.isError)
@@ -130,6 +140,37 @@ export function Providers() {
           </Notice>
         )}
       </Panel>
+      <Panel title="Claude with your Claude subscription">
+        {claude.isPending ? (
+          <Skeleton className="h-10" />
+        ) : claude.isError ? (
+          <ErrorNotice title="Could not check Claude" error={claude.error} />
+        ) : claude.data.connected ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2 text-body">
+              <Badge>Connected</Badge>
+              {claude.data.plan && <Badge tone="outline">{claude.data.plan.toUpperCase()}</Badge>}
+              <span className="text-ink-muted">
+                Uses your Claude Code sign-in{claude.data.email ? ` (${claude.data.email})` : ''} ·
+                Claude effort is fixed at Medium
+              </span>
+            </div>
+            {claudeUsage.isPending ? (
+              <Skeleton className="h-24" />
+            ) : claudeUsage.isError ? (
+              <ErrorNotice title="Could not load Claude usage" error={claudeUsage.error} />
+            ) : (
+              <ClaudeUsageCard usage={claudeUsage.data} />
+            )}
+          </div>
+        ) : (
+          <Notice tone="warn" title="Claude is not signed in with a Claude subscription">
+            {claude.data.installed
+              ? 'Run `claude auth login` in PowerShell, choose your Claude account, then reload this page.'
+              : 'Install Claude Code, run `claude auth login` in PowerShell, then reload this page.'}
+          </Notice>
+        )}
+      </Panel>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{free.map(card)}</div>
       {/* Its own heading, below the free ones, because the default has to keep reading as
           "no card required" even once these exist. */}
@@ -204,6 +245,62 @@ function CodexUsageCard({ usage }: { usage: CodexUsage }) {
         Account allowance is shared with Codex and other eligible agent features. Harness calls and
         tokens count only requests saved by Alpha Harness.
       </p>
+    </div>
+  )
+}
+
+function ClaudeUsageCard({ usage }: { usage: ClaudeUsage }) {
+  const queryClient = useQueryClient()
+  const check = useMutation({
+    mutationFn: () => llm.claudeUsage(true),
+    onSuccess: (fresh) => queryClient.setQueryData(['ai', 'claude', 'usage'], fresh),
+  })
+  const seen = usage.observedAt
+    ? fmt.dateTime(new Date(usage.observedAt * 1000).toISOString())
+    : null
+  return (
+    <div className="flex flex-col gap-3">
+      {usage.error && <Notice tone="warn" title={usage.error} />}
+      {usage.status === 'rejected' && (
+        <Notice tone="warn" title="Claude reports the plan's limit is reached until the reset." />
+      )}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {usage.fiveHour && (
+          <UsageWindow
+            label="5-hour allowance"
+            window={{ ...usage.fiveHour, windowMinutes: 300 }}
+          />
+        )}
+        {usage.sevenDay && (
+          <UsageWindow
+            label="Weekly allowance"
+            window={{ ...usage.sevenDay, windowMinutes: 10_080 }}
+          />
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric boxed label="Harness calls" value={fmt.int(usage.localCalls)} size="sm" />
+        <Metric
+          boxed
+          label="Recorded tokens"
+          value={fmt.compact(usage.localTokens)}
+          hint={usage.localTokensComplete ? undefined : 'Recent Power Pool calls only'}
+          size="sm"
+        />
+        <Metric boxed label="Extra usage" value={usage.usingOverage ? 'In use' : 'Off'} size="sm" />
+        <Metric boxed label="Last reading" value={seen ?? '—'} size="sm" />
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="secondary" loading={check.isPending} onClick={() => check.mutate()}>
+          <RefreshCwIcon />
+          Check allowance now
+        </Button>
+        <p className="max-w-prose text-body-compact text-pretty text-ink-subtle">
+          The allowance is shared with Claude, Claude Code and Cowork. It updates after every
+          Harness call; checking now spends one tiny Haiku request.
+        </p>
+      </div>
+      {check.isError && <ErrorNotice title="Could not check the allowance" error={check.error} />}
     </div>
   )
 }

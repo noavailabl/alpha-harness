@@ -23,10 +23,11 @@ from ..labs.launch import (
     synced_universes,
 )
 from ..labs.params import POWER_POOL_SAMPLER, PowerPoolParams
+from ..llm.claude_cli import DEFAULT_MODEL_ID as CLAUDE_DEFAULT_MODEL
 from ..llm.codex_cli import DEFAULT_MODEL_ID as CODEX_DEFAULT_MODEL
 from ..llm.codex_cli import MEDIUM_EFFORT
 from ..llm.prompts import POWER_POOL_LAB
-from ..llm.registry import DEFAULT_MODEL
+from ..llm.registry import DEFAULT_MODEL, SUBSCRIPTION
 from ..llm.text import estimate_tokens
 from ..schemas import Out
 from .deps import State, refuse
@@ -82,17 +83,20 @@ class PowerPoolPreview(Out):
 async def _models(state: Any) -> list[dict[str, Any]]:
     """Models whose provider has an enabled Key, richest daily budget first."""
     keys = [k for k in await state.llm.keys.list_keys() if k.enabled]
-    codex_connected = await state.llm.codex.connected()
+    signed_in = {
+        "codex": await state.llm.codex.connected(),
+        "claude": await state.llm.claude.connected(),
+    }
     out = []
     for m in state.llm.registry.all():
         mine = [k for k in keys if k.provider == m.provider]
-        if m.kind == "embedding" or (m.provider != "codex" and not mine):
+        if m.kind == "embedding" or (m.provider not in SUBSCRIPTION and not mine):
             continue
-        if m.provider == "codex" and not codex_connected:
+        if m.provider in SUBSCRIPTION and not signed_in[m.provider]:
             continue
         left = (
             None
-            if m.provider == "codex"
+            if m.provider in SUBSCRIPTION
             else sum([(await state.llm.ledger.headroom(k.id, m)).daily_remaining for k in mine])
         )
         out.append(
@@ -102,7 +106,7 @@ async def _models(state: Any) -> list[dict[str, Any]]:
                 "provider": m.provider,
                 "tpm": m.tpm,
                 "remainingToday": left,
-                "effort": MEDIUM_EFFORT if m.provider == "codex" else None,
+                "effort": MEDIUM_EFFORT if m.provider in SUBSCRIPTION else None,
             }
         )
     return out
@@ -120,6 +124,8 @@ async def options(state: State) -> PowerPoolOptions:
                 if DEFAULT_MODEL in ids
                 else CODEX_DEFAULT_MODEL
                 if CODEX_DEFAULT_MODEL in ids
+                else CLAUDE_DEFAULT_MODEL
+                if CLAUDE_DEFAULT_MODEL in ids
                 else (ids[0] if ids else None)
             ),
             "maxSimulations": search.MAX_SIMULATIONS,
@@ -140,8 +146,8 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
     info = state.llm.registry.get(model_id)
     if model_id not in models or info is None:
         problems.append(
-            f"{model_id} can't run. Sign in to Codex with ChatGPT or add an enabled Key "
-            "in LLM Integration."
+            f"{model_id} can't run. Sign in to Codex with ChatGPT, sign in to Claude with "
+            "`claude auth login`, or add an enabled Key in LLM Integration."
         )
 
     schema = await state.metadata.cached_settings_schema()
@@ -211,7 +217,7 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
         "problems": problems,
         "warnings": warnings,
         "model": model_id,
-        "effort": MEDIUM_EFFORT if info is not None and info.provider == "codex" else None,
+        "effort": MEDIUM_EFFORT if info is not None and info.provider in SUBSCRIPTION else None,
     }
 
 

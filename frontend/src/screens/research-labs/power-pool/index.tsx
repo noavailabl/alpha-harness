@@ -143,7 +143,9 @@ export function PowerPoolLabScreen() {
                   label:
                     m.provider === 'codex'
                       ? `${m.label} · Medium · ChatGPT allowance`
-                      : `${m.label} · ${fmt.int(m.remainingToday)} left today`,
+                      : m.provider === 'claude'
+                        ? `${m.label} · Medium · Claude allowance`
+                        : `${m.label} · ${fmt.int(m.remainingToday)} left today`,
                 }))}
                 value={model}
                 onChange={(v) => set({ model: v })}
