@@ -1,8 +1,12 @@
 /** The Datasets and Settings panels of a lab task, and the task settings every lab asks for. */
 
-import { DatabaseIcon, XIcon } from 'lucide-react'
+import { DatabaseIcon, FilterIcon } from 'lucide-react'
+import type { Scope } from '@/api/types'
 import { DASH, fmt } from '@/lib/format'
+import { useCores } from '@/lib/preferences'
 import { isRegionAgnostic, regionLabel, useScopeOptions } from '@/lib/scope'
+import { DatasetChips, useDatasetTree } from '@/screens/data/dataset-chips'
+import { describeFilter, type FieldFilterState } from '@/screens/data/state'
 import { NeutralizationPicker } from '@/screens/research-labs/neutralization'
 import {
   Button,
@@ -82,16 +86,23 @@ export interface LabPlan {
 
 export function DatasetsPanel({
   ids,
-  names,
+  scope,
   onChoose,
   onRemove,
+  filter,
+  onClearFilter,
 }: {
   ids: string[]
-  names: Map<string, string>
+  /** The market the datasets belong to, which places each under its category. */
+  scope: Scope
   onChoose: () => void
-  onRemove: (id: string) => void
+  onRemove: (ids: string[]) => void
+  /** The Data Explorer's filter the datasets were chosen under, which narrows their fields. */
+  filter: FieldFilterState | null | undefined
+  onClearFilter: () => void
 }) {
   const chosen = ids.length > 0
+  const { tree, nameOf, ready } = useDatasetTree(chosen ? scope : null)
   return (
     <Panel
       title="Datasets"
@@ -105,24 +116,19 @@ export function DatasetsPanel({
       }
     >
       {chosen ? (
-        <div className="flex flex-wrap gap-1.5">
-          {ids.map((id) => (
-            <span
-              key={id}
-              title={id}
-              className="inline-flex h-7 max-w-full items-center gap-1 rounded-sm border border-hairline-strong bg-surface-3 pr-1 pl-3 text-body-compact text-ink"
-            >
-              <span className="truncate">{names.get(id) ?? id}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${names.get(id) ?? id}`}
-                className="shrink-0 rounded-xs p-0.5 text-ink-subtle transition-colors hover:text-ink"
-                onClick={() => onRemove(id)}
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </span>
-          ))}
+        <div className="flex flex-col gap-3">
+          <DatasetChips tree={tree} value={ids} nameOf={nameOf} onRemove={onRemove} ready={ready} />
+          {filter && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body-compact text-ink-subtle">
+              <FilterIcon className="size-3.5 shrink-0" aria-hidden />
+              <span className="min-w-0">
+                Only fields matching {describeFilter(filter, scope.region).join(' \u00b7 ')}
+              </span>
+              <Button size="sm" variant="ghost" onClick={onClearFilter}>
+                Use All Fields
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <Empty title="No datasets chosen" icon={<DatabaseIcon />}>
@@ -156,6 +162,7 @@ export function SettingsPanel({
   error: unknown
 }) {
   const simulations = draft.simulations
+  const cores = useCores(draft.cores)
   const showVector = (plan?.fields.vector ?? 0) > 0 || (plan?.leftOut.vector ?? 0) > 0
   // BRAIN's own legal list for this market, which is wider than the four a lab searches by
   // default — picking any of them is what tells the lab to search those instead.
@@ -170,7 +177,7 @@ export function SettingsPanel({
     <Panel title="Settings">
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
-          <CoresSetting value={draft.cores} onChange={(cores) => set({ cores })} />
+          <CoresSetting value={cores} onChange={(next) => set({ cores: next })} />
           <SimulationsSetting
             value={simulations}
             max={maxSimulations}
@@ -200,7 +207,6 @@ export function SettingsPanel({
             available={neutralizations}
             value={draft.neutralizations}
             onChange={(next) => set({ neutralizations: next })}
-            hint="None chosen searches Market, Sector, Industry and Subindustry."
           />
         )}
         <div className="grid gap-3 sm:grid-cols-3">

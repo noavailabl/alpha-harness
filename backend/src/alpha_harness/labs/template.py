@@ -12,16 +12,15 @@ the universe, a field for each FIELD tag from that universe's own fields, a valu
 variable tag, an operator for each choice block, and the neutralization.
 """
 
-from __future__ import annotations
-
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..brain.schemas import SimulationRequest, SimulationSettings
 from . import search
 from .fastexpr import Node, OperatorInfo, operator_table
+from .fastexpr import parse as parse_expression
 from .fastexpr import render as write
 
 if TYPE_CHECKING:
@@ -123,7 +122,8 @@ def blocks(operators: list[dict[str, Any]]) -> dict[str, Block]:
 
     Inputs come from each definition's parameters without a default: ``d`` or ``lookback``
     takes a lookback, ``group`` takes a group, anything else a signal. Options are the
-    parameters whose default is a number or true/false. Comparisons have no call form in
+    parameters whose default is a number, true/false, a word or a list of numbers, from
+    every signature the definition gives. Comparisons have no call form in
     their definitions (``input1 > input2``), so they are recognised by that shape.
     """
     found: dict[str, Block] = {}
@@ -152,7 +152,22 @@ def blocks(operators: list[dict[str, Any]]) -> dict[str, Block]:
         if match and SYMBOLS.get(name) == match.group(1):
             category = str(operator.get("category") or "Logical")
             found[name] = Block(name, category, ("signal", "signal"), {}, match.group(1))
+        elif (block := found.get(name)) is not None:
+            found[name] = replace(block, options=_later_options(name, definition, block.options))
     return dict(sorted(found.items()))
+
+
+def _later_options(
+    name: str, definition: str, options: dict[str, float | bool | str]
+) -> dict[str, float | bool | str]:
+    """Options only a later signature names: ``bucket`` takes ``buckets`` in its second."""
+    merged = dict(options)
+    for later in list(re.finditer(rf"\b{re.escape(name)}\s*\(", definition))[1:]:
+        info = operator_table([{"name": name, "definition": definition[later.start() :]}])
+        shape = _shape(info[name]) if name in info else None
+        for key, value in (shape[1] if shape else {}).items():
+            merged.setdefault(key, value)
+    return merged
 
 
 def _shape(info: OperatorInfo) -> tuple[tuple[str, ...], dict[str, float | bool | str]] | None:
@@ -515,6 +530,84 @@ def _shaped(slot: dict[str, Any] | None) -> Node:
     if kind == "data":
         return Node("name", slot["name"])
     return _literal(slot["value"])
+
+
+#: Stand-ins the Fast Expression tokenizer reads as one name: ``{a OR b}``, ``FIELD A``, ``?``.
+_OR, _TAG, _HOLE = "__OR__", "__TAG__", "__HOLE__"
+_CHOICE = re.compile(r"\{\s*([a-z][a-z0-9_]*(?:\s+OR\s+[a-z][a-z0-9_]*)+)\s*\}")
+_VARIABLE = re.compile(
+    rf"\b({'|'.join(sorted(VARIABLE_NAMES, key=len, reverse=True))})(?:[ \t]+([A-D]))?\b"
+)
+_EMPTY = re.compile(r"(?<=[(,])\s*\?\s*(?=[,)])")
+_SYMBOL_NAMES = {symbol: name for name, symbol in SYMBOLS.items()}
+
+
+def parse(text: str) -> dict[str, Any]:
+    """A typed template, written the way :func:`skeleton` writes one. Raises ValueError."""
+    if text.strip() == "?":
+        return {"version": VERSION, "root": None}
+    marked = _CHOICE.sub(lambda m: _OR.join(re.split(r"\s+OR\s+", m.group(1))), text)
+    marked = _VARIABLE.sub(lambda m: f"{m.group(1)}{_TAG}{m.group(2) or 'A'}", marked)
+    marked = _EMPTY.sub(_HOLE, marked)
+    try:
+        return load({"version": VERSION, "root": _block(parse_expression(marked))})
+    except ValueError as exc:
+        # Positions count the stand-ins, so they would point at the wrong character.
+        message = re.sub(r" at \d+", "", str(exc))
+        for stand_in, typed in ((_OR, " OR "), (_TAG, " "), (_HOLE, "?")):
+            message = message.replace(stand_in, typed)
+        raise ValueError(message) from exc
+
+
+def _block(node: Node) -> dict[str, Any] | None:
+    if node.kind == "num":
+        return _num(_number(node.value))
+    if node.kind == "unary" and node.value == "-":
+        inner = node.args[0]
+        return _num(-_number(inner.value)) if inner.kind == "num" else _op("reverse", _block(inner))
+    if node.kind == "binary" and node.value in _SYMBOL_NAMES:
+        return _op(_SYMBOL_NAMES[node.value], *(_block(arg) for arg in node.args))
+    if node.kind == "call":
+        block: dict[str, Any] = {
+            "kind": "op",
+            "ops": node.value.split(_OR),
+            "args": [_block(arg) for arg in node.args],
+        }
+        if node.kwargs:
+            block["options"] = {key: _option(value) for key, value in node.kwargs}
+        return block
+    if node.kind == "name":
+        if node.value == _HOLE:
+            return None
+        name, _, tag = node.value.partition(_TAG)
+        if tag:
+            return _var(name, tag)
+        if name in DATA_FIELDS or name in GROUP_FIELDS:
+            return _data(name)
+        raise ValueError(
+            f"{name} is not something a template can read. Write FIELD A for a field the "
+            f"search chooses, or use one of {', '.join(DATA_FIELDS)} or a group field."
+        )
+    raise ValueError(
+        f"A template cannot hold {write(node)}. Write it with its operator's name instead."
+    )
+
+
+def _option(node: Node) -> float | bool | str:
+    if node.kind == "num":
+        return _number(node.value)
+    if node.kind == "unary" and node.value == "-" and node.args[0].kind == "num":
+        return -_number(node.args[0].value)
+    if node.kind == "str":
+        return node.value[1:-1]
+    if node.kind == "name" and _TAG not in node.value:
+        return {"true": True, "false": False}.get(node.value, node.value)
+    raise ValueError(f"An option takes a number, a word or true/false, not {write(node)}.")
+
+
+def _number(text: str) -> float:
+    number = float(text)
+    return int(number) if number.is_integer() else number
 
 
 def request_for(params: dict[str, Any], run: TemplateParams) -> SimulationRequest:

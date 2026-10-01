@@ -4,8 +4,6 @@ Prompts are served in full on purpose: one decides what an answer looks like and
 otherwise invisible. Keys are the only secret here, and leave only as a masked hint.
 """
 
-from __future__ import annotations
-
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -19,7 +17,7 @@ from ..llm.codex_cli import CODEX_MODELS, LEGACY_MODEL_ID
 from ..llm.keys import LLMError, serialise
 from ..llm.prompts import PROMPTS
 from ..llm.providers import LLMProviders, catalogue
-from ..llm.registry import LLMModels
+from ..llm.registry import LLMModels, ModelInfo
 from ..llm.text import estimate_tokens
 from ..schemas import Out
 from .deps import State
@@ -43,7 +41,7 @@ class PromptList(Out):
 class LLMKeyUsage(Out):
     key_id: int
     model: str
-    #: Pacific day, YYYY-MM-DD.
+    #: The model's own day, YYYY-MM-DD in its reset time zone.
     day: str
     requests: int
     tokens: int
@@ -66,33 +64,98 @@ class LLMKey(Out):
 
 class LLMBudget(Out):
     model: str
-    label: str
+    #: How requests name this model: its provider and id together.
+    ref: str
     provider: str
-    per_key_per_day: int
+    #: Requests today across every enabled key, each held to its model limit or its cap.
+    allowed_today: int
     remaining_today: int
-    bulk: bool
+    reset_timezone: str
+    #: Until midnight in ``reset_timezone``, when this model's allowance comes back.
+    reset_in_seconds: int
 
 
 class LLMKeyStatus(Out):
     keys: list[LLMKey]
     enabled: int
     budget: list[LLMBudget]
-    reset_in_seconds: int
-    quota_timezone: str
+    #: The soonest any set-up model's day turns over, or null with none set up.
+    reset_in_seconds: int | None
 
 
 class KeyWorks(Out):
     key_id: int
     ok: Literal[True]
-    #: How many models the key can reach, and those new to the roster.
+    #: How many models the key can reach.
     models: int
-    new_models: list[str]
 
 
 class KeyFailed(Out):
     key_id: int
     ok: Literal[False]
     error: str
+
+
+def _check(result: dict[str, Any]) -> KeyWorks | KeyFailed:
+    if result["ok"]:
+        return KeyWorks.model_validate(result)
+    return KeyFailed.model_validate(result)
+
+
+# --- setup ----------------------------------------------------------------
+
+
+@router.get("/models")
+async def models(state: State) -> LLMModels:
+    """The models set up, each with the limits its user gave it."""
+    return state.llm.registry.roster()
+
+
+class SetModel(BaseModel):
+    provider: str
+    model: str = Field(min_length=1, max_length=200, description="The provider's model id")
+    requests_per_minute: int = Field(ge=1)
+    requests_per_day: int = Field(ge=1)
+    reset_timezone: str = Field(
+        min_length=1, max_length=64, description="IANA time zone whose midnight starts a new day"
+    )
+    max_prompt_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Most tokens one Power Pool prompt may use; null for default",
+    )
+
+
+@router.put("/models")
+async def set_model(body: SetModel, state: State) -> ModelInfo:
+    """Set a model up with its limits, or change the limits of one already set up."""
+    return await state.llm.registry.set(
+        body.provider,
+        body.model,
+        body.requests_per_minute,
+        body.requests_per_day,
+        body.reset_timezone,
+        body.max_prompt_tokens,
+    )
+
+
+@router.delete("/models", status_code=204)
+async def remove_model(provider: str, model: str, state: State) -> None:
+    """Query parameters, not a path: model ids carry slashes."""
+    await state.llm.registry.remove(provider, model)
+
+
+class OfferedModels(Out):
+    #: Model ids the provider lists for this account, sorted. Empty when it would not say.
+    models: list[str]
+    #: Why the list is empty, when it is. The id can still be typed.
+    error: str | None
+
+
+@router.get("/providers/{provider}/models")
+async def offered_models(provider: str, state: State) -> OfferedModels:
+    """What a provider's Key can reach, asked live. Costs no generation request."""
+    return OfferedModels.model_validate(await state.llm.offered(provider))
 
 
 class CodexStatus(Out):
@@ -154,25 +217,6 @@ class ClaudeUsage(Out):
     error: str | None
 
 
-def _check(result: dict[str, Any]) -> KeyWorks | KeyFailed:
-    if result["ok"]:
-        return KeyWorks.model_validate(result)
-    return KeyFailed.model_validate(result)
-
-
-# --- setup ----------------------------------------------------------------
-
-
-@router.get("/models")
-async def models(state: State) -> LLMModels:
-    """The model roster with each one's daily budget.
-
-    Requests-per-day is the limit that ends a session, so it travels with every entry
-    rather than sitting in a help page.
-    """
-    return state.llm.registry.roster()
-
-
 @router.get("/codex")
 async def codex_status(state: State) -> CodexStatus:
     """Whether the local Codex CLI can use the signed-in ChatGPT allowance."""
@@ -220,11 +264,13 @@ async def _local_usage(state: Any, model_ids: set[str]) -> tuple[int, int, bool]
             )
         ).all()
     for meta in messages:
-        if str(meta.get("model") or "") in model_ids:
+        saved = str(meta.get("model") or "")
+        if saved in model_ids or saved.partition(":")[2] in model_ids:
             calls += 1
             tokens += int(meta.get("tokens") or 0)
     for params in studies:
-        if str(params.get("model") or "") not in model_ids:
+        saved = str(params.get("model") or "")
+        if saved not in model_ids and saved.partition(":")[2] not in model_ids:
             continue
         llm = params.get("llm") if isinstance(params.get("llm"), dict) else {}
         history = params.get("calls") if isinstance(params.get("calls"), list) else []

@@ -4,6 +4,7 @@
  * submits an alpha.
  */
 
+import { queryOptions } from '@tanstack/react-query'
 import type { components } from '@/api/generated'
 import { http, qs } from '@/api/http'
 import type { AlphaCheck, Scope } from '@/api/types'
@@ -43,6 +44,7 @@ export type AlphaRow = Schemas['AlphaRow']
 export type AlphaPage = Schemas['AlphaPage']
 export type AlphaSettings = Schemas['AlphaSettings']
 export type AlphaDetail = Omit<Schemas['AlphaDetail'], 'checks'> & { checks: AlphaCheck[] }
+export type AlphaPnl = Schemas['AlphaPnl']
 export type SubmittableAlpha = Omit<Schemas['SubmittableAlpha'], 'checks'> & {
   checks: AlphaCheck[]
 }
@@ -79,10 +81,18 @@ export const pool = {
   query: (body: AlphaPageRequest) => http.post<AlphaPage>('/api/vault/alphas/query', body),
   detail: (alphaId: string) =>
     http.get<AlphaDetail>(`/api/vault/alphas/${encodeURIComponent(alphaId)}/detail`),
+  /** Downloads the daily PnL from BRAIN the first time, so it can take a while. */
+  pnl: (alphaId: string) =>
+    http.get<AlphaPnl>(`/api/vault/alphas/${encodeURIComponent(alphaId)}/pnl`),
   submittable: (scope: Scope, limit = 200) =>
     http.get<SubmittableResponse>(
       `/api/vault/submittable${qs({ region: scope.region, delay: scope.delay, universe: scope.universe, instrument_type: scope.instrumentType, limit })}`,
     ),
+  /** Every market at once: the sidebar's count, and where an empty market points instead. */
+  everywhere: queryOptions({
+    queryKey: ['pool', 'submittable-count'],
+    queryFn: () => http.get<SubmittableResponse>('/api/vault/submittable?limit=1'),
+  }),
   /** Re-runs the submission checks on BRAIN without submitting. */
   check: (alphaId: string) =>
     http.get<{ is?: { checks?: AlphaCheck[] } }>(

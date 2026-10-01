@@ -3,7 +3,7 @@
 Two behaviours in here are the reason this file exists, and both break naive clients:
 
 1. **A response carrying ``Retry-After`` means "not ready yet".** The header's presence —
-   not the status code — is the signal (``docs/wqb-api/03-conventions.md``).
+   not the status code — is the signal.
    :meth:`BrainClient.poll` re-issues the request until it is gone; recordsets,
    correlations and checks are read that way.
 2. **``POST /simulations`` answers in headers.** The id is in ``Location``; the caller
@@ -11,8 +11,6 @@ Two behaviours in here are the reason this file exists, and both break naive cli
 
 Versioning lives in the ``Accept`` header (``application/json;version=N``), not the path.
 """
-
-from __future__ import annotations
 
 import asyncio
 import math
@@ -124,8 +122,8 @@ class BrainResponse:
 def _parse_retry_after(headers: httpx2.Headers) -> float | None:
     """Seconds to wait, or ``None`` when the header is absent and the result is ready.
 
-    Exactly the documented parser (``docs/wqb-api/endpoints/osmosis.md``): numeric seconds,
-    or an HTTP-date; zero, negative, a past date or anything unreadable means poll now.
+    Exactly the documented parser: numeric seconds, or an HTTP-date; zero, negative, a past
+    date or anything unreadable means poll now.
     """
     raw = headers.get("retry-after")
     if raw is None:
@@ -161,9 +159,10 @@ class BrainClient:
         #: behind it pace on measurements rather than on an assumption.
         self._measured: dict[str, asyncio.Event] = {}
         self._pace_lock = asyncio.Lock()
-        #: Monotonic time before which no request is sent: set by a ``429`` so every caller
-        #: backs off together instead of each retrying into a server that said stop.
-        self._resume_at = 0.0
+        #: Monotonic time per endpoint before which nothing is sent to it: set by a ``429`` so
+        #: its callers back off together instead of each retrying into a server that said
+        #: stop. Per endpoint, so a throttled catalog crawl never holds up a simulation poll.
+        self._resume_at: dict[str, float] = {}
         self._client = httpx2.AsyncClient(
             base_url=self.base_url,
             timeout=httpx2.Timeout(TIMEOUT, connect=10.0),
@@ -208,8 +207,18 @@ class BrainClient:
 
     @staticmethod
     def _bucket(path: str) -> str:
-        """The endpoint a path is metered under: ``/simulations/{id}`` shares ``simulations``."""
-        return path.strip("/").split("/", 1)[0]
+        """The window a path is metered under: ``/simulations/{id}`` shares ``simulations``.
+
+        Measured: an Alpha and its recordsets share one window, but its correlations have
+        their own, much tighter one, and its check reports none.
+        """
+        parts = path.strip("/").split("/")
+        if parts[0] == "alphas" and len(parts) > 2 and parts[2] in ("correlations", "check"):
+            return f"alphas/{parts[2]}"
+        return parts[0]
+
+    def _pause(self, bucket: str, seconds: float) -> None:
+        self._resume_at[bucket] = max(self._resume_at.get(bucket, 0.0), time.monotonic() + seconds)
 
     async def _reserve(self, bucket: str) -> None:
         """Hold the caller until this endpoint's next free slot.
@@ -281,12 +290,12 @@ class BrainClient:
         """
         clean_params = {k: v for k, v in params.items() if v is not None} if params else None
 
+        bucket = self._bucket(path)
         # Re-checked after each sleep: another 429 may have pushed the pause further out.
         # Jittered so every waiter does not re-send in the same tick and draw another 429.
-        while (wait := self._resume_at - time.monotonic()) > 0:  # noqa: ASYNC110
+        while (wait := self._resume_at.get(bucket, 0.0) - time.monotonic()) > 0:  # noqa: ASYNC110
             await asyncio.sleep(wait + random.uniform(0.05, 0.25))
 
-        bucket = self._bucket(path)
         await self._reserve(bucket)
 
         try:
@@ -330,11 +339,10 @@ class BrainClient:
             location=response.headers.get("location"),
         )
         if result.status == 429 and result.retry_after:
-            # The server named its own wait: nobody sends before it is over.
+            # The server named its own wait: nobody sends to this endpoint before it is over.
             # Capped: every request waits on this, polls included, and a day-long Retry-After
             # would stop finished alphas being read.
-            pause = min(result.retry_after, MAX_MEASURED_GAP)
-            self._resume_at = max(self._resume_at, time.monotonic() + pause)
+            self._pause(bucket, min(result.retry_after, MAX_MEASURED_GAP))
 
         if raise_for_status and response.status_code >= 400:
             raise self.to_error(method, path, result)
@@ -359,7 +367,7 @@ class BrainClient:
         return None, None
 
     def to_error(self, method: str, path: str, r: BrainResponse) -> BrainError:
-        """Map a failed response to a typed error (``docs/wqb-api/04-error-handling.md``)."""
+        """Map a failed response to a typed error."""
         where = f"{method} {path}"
         body = r.body
         detail = body.get("detail") if isinstance(body, dict) else None
@@ -428,7 +436,7 @@ class BrainClient:
 
         Waits the server's ``Retry-After`` when it sends one, otherwise exponential backoff
         with jitter. The thresholds behind a ``429`` are server-side, so nothing here
-        guesses a request rate: a ``429`` pauses every caller of this client for the wait.
+        guesses a request rate: a ``429`` pauses every caller of that endpoint for the wait.
         Never retries the daily cap.
         """
         for attempt in range(1, ATTEMPTS):
@@ -445,7 +453,7 @@ class BrainClient:
                 # Jitter so parallel callers do not resynchronise on the same instant.
                 delay += random.uniform(0, max(delay, 1.0) * 0.25)
                 if isinstance(exc, BrainRateLimited):
-                    self._resume_at = max(self._resume_at, time.monotonic() + delay)
+                    self._pause(self._bucket(path), delay)
 
                 params = kwargs.get("params") or {}
                 # Which scope is being throttled: without it a slow market and a starved one

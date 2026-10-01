@@ -35,6 +35,8 @@ export const templateLab = {
   update: (id: number, body: TemplateBody) =>
     http.put<TemplateSummary>(`${B}/templates/${id}`, body),
   remove: (id: number) => http.del<Schemas['TemplateRemoved']>(`${B}/templates/${id}`),
+  /** A typed template as blocks, or a 422 saying what could not be read. */
+  parse: (text: string) => http.post<{ tree: TemplateDoc }>(`${B}/parse`, { text }),
   /** Free; queues nothing. */
   preview: (body: TemplateLabRequest) => http.post<TemplateLabPreview>(`${B}/preview`, body),
   /** Adds the template's search to Tasks, not started. Spends nothing until it is run there. */

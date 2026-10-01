@@ -8,20 +8,22 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { Scope } from '@/api/types'
 
-export interface PickResult<From> {
+export interface PickResult<From, Extra = never> {
   scope: Scope
   ids: string[]
   from: From
+  /** Whatever else the picking screen hands back with the ids. */
+  extra?: Extra | undefined
 }
 
-interface Pick<From> {
+interface Pick<From, Extra> {
   active: boolean
   scope: Scope | null
   ids: string[]
   from: From
-  result: PickResult<From> | null
+  result: PickResult<From, Extra> | null
   start: (scope: Scope, ids: string[], from: From) => void
-  finish: () => void
+  finish: (extra?: Extra) => void
   cancel: () => void
   /**
    * Moves the pick to `scope`. What was picked belongs to a region and delay, so only a
@@ -29,12 +31,12 @@ interface Pick<From> {
    */
   follow: (scope: Scope) => void
   /** The finished pick, once, and only for the lab that started it. */
-  take: (from: From) => PickResult<From> | null
+  take: (from: From) => PickResult<From, Extra> | null
 }
 
 /** `first` also stands in for a pick kept from before picks named their lab. */
-export function createPick<From extends string>(name: string, first: From) {
-  return create<Pick<From>>()(
+export function createPick<From extends string, Extra = never>(name: string, first: From) {
+  return create<Pick<From, Extra>>()(
     persist(
       (set, get) => ({
         active: false,
@@ -43,13 +45,13 @@ export function createPick<From extends string>(name: string, first: From) {
         from: first,
         result: null,
         start: (scope, ids, from) => set({ active: true, scope, ids, from, result: null }),
-        finish: () => {
+        finish: (extra) => {
           const { scope, ids, from } = get()
           set({
             active: false,
             scope: null,
             ids: [],
-            result: scope ? { scope, ids, from } : null,
+            result: scope ? { scope, ids, from, extra } : null,
           })
         },
         cancel: () => set({ active: false, scope: null, ids: [], result: null }),

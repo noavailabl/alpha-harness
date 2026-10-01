@@ -8,6 +8,8 @@ import {
   ListChecksIcon,
   RefreshCwIcon,
   SparklesIcon,
+  TriangleIcon,
+  TrophyIcon,
   WrenchIcon,
 } from 'lucide-react'
 
@@ -20,6 +22,7 @@ export const POOL_TABS = [
 export const AI_TABS = [
   { tab: 'providers', label: 'Providers' },
   { tab: 'keys', label: 'Keys' },
+  { tab: 'models', label: 'Models' },
   { tab: 'budget', label: 'Budget' },
   { tab: 'prompts', label: 'Prompts' },
   { tab: 'assistant', label: 'Assistant' },
@@ -98,16 +101,28 @@ export const NAV = [
     icon: ChartPieIcon,
   },
   {
+    to: '/competitions',
+    group: 'BRAIN',
+    label: 'Competitions',
+    icon: TrophyIcon,
+  },
+  {
+    to: '/pyramids',
+    group: 'BRAIN',
+    label: 'Pyramids',
+    icon: TriangleIcon,
+  },
+  {
+    to: '/sync',
+    group: 'BRAIN',
+    label: 'Sync',
+    icon: RefreshCwIcon,
+  },
+  {
     to: '/ai',
     group: 'Setup',
     label: 'LLM Integration',
     icon: SparklesIcon,
     tabs: AI_TABS,
-  },
-  {
-    to: '/pyramids',
-    group: 'Setup',
-    label: 'Sync with BRAIN',
-    icon: RefreshCwIcon,
   },
 ] as const

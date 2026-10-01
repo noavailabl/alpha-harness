@@ -7,8 +7,6 @@ The session cookie jar is persisted deliberately: signing in costs a proof-of-wo
 and counts against a lockout budget, so a backend restart must not trigger a new one.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 from datetime import timedelta

@@ -8,8 +8,6 @@ dicts: bulk reads where validating every row costs too much (``list_data_fields_
 open-ended or undocumented blobs the callers read selectively.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -35,7 +33,7 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-# Endpoints pinned to a non-default Accept version (docs/wqb-api/03-conventions.md).
+# Endpoints pinned to a non-default Accept version.
 V_SETTINGS_SCHEMA = "4.0"  # OPTIONS /simulations
 #: GET /data-fields with all four scope params. Unpaginated in practice: tens of thousands
 #: of rows arrive in one response.
@@ -146,7 +144,7 @@ class BrainEndpoints:
 
         ``actions.POST.settings.children`` is the common tree; each type's
         ``settings.children`` overrides it, and region, universe, delay and neutralization
-        live only there (``docs/wqb-api/schemas/simulation.md``, "Merging rule").
+        live only there.
 
         The region-agnostic tree is folded into the same schema rather than kept apart:
         ``universe``, ``delay`` and ``neutralization`` are keyed *by region*, so it only adds
@@ -289,6 +287,19 @@ class BrainEndpoints:
         r = await self.client.request("GET", "/users/self/alphas/summary", version=V_ALPHA_SUMMARY)
         return r.body if isinstance(r.body, dict) else {}
 
+    # -- competitions ----------------------------------------------------
+
+    async def competitions(self) -> list[dict[str, Any]]:
+        """Every competition, past and ongoing, with this account's ``status`` in each."""
+        r = await self.client.request("GET", "/competitions")
+        body = r.body if isinstance(r.body, dict) else {}
+        return list(body.get("results") or [])
+
+    async def competition(self, competition_id: str) -> dict[str, Any]:
+        """One competition. Only this carries the account's ``leaderboard`` standing."""
+        r = await self.client.request("GET", f"/competitions/{competition_id}")
+        return r.body if isinstance(r.body, dict) else {}
+
     # -- data catalog ----------------------------------------------------
 
     async def list_data_categories(self) -> list[DataCategory]:
@@ -306,7 +317,7 @@ class BrainEndpoints:
     async def list_data_fields_all(self, **params: Any) -> list[BulkField]:
         """Every field in one scope, in one request.
 
-        Needs all four scope parameters and ``version=3.0`` (``docs/wqb-api/endpoints/data.md``).
+        Needs all four scope parameters and ``version=3.0``.
         The body is taken as bytes and decoded by msgspec: a market is ~40 MB, and the
         standard library's parser spent that on the event loop.
         """

@@ -5,8 +5,6 @@ tracker, the sync engine — and wires them together. Routers reach it through a
 dependency, so nothing constructs its own connections and shutdown is deterministic.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import time
@@ -15,6 +13,7 @@ from datetime import timedelta
 import structlog
 from sqlalchemy import select
 
+from . import preferences, updates
 from .account import AuthService, PlatformMetadata
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
@@ -25,7 +24,7 @@ from .catalog.sync import CatalogSync, serialise_run
 from .config import BRAIN_API_BASE, Settings
 from .db.duck import Catalog
 from .db.models import SimStatus, SimulationRecord, Study, StudyStatus, utcnow
-from .db.sqlite import Database
+from .db.sqlite import Database, snapshot
 from .engine.slots import BatchEngine
 from .engine.tracker import SimulationTracker
 from .labs import scheduler
@@ -105,7 +104,7 @@ class AppState:
         )
         self.queries = CatalogQueries(self.catalog)
 
-        self.models = ModelRegistry()
+        self.models = ModelRegistry(self.db)
         self.llm = LLMService(self.db, self.sealer, self.models)
         self.chat = ChatService(self.db, self.llm, self.queries)
         self.optimizer = Optimizer(
@@ -124,7 +123,7 @@ class AppState:
         self._last_login_attempt = float("-inf")
 
     async def _pause_stalled_task(self, task: str) -> None:
-        """Stop a stalled batch's task from replacing it with more work."""
+        """Keep a stalled batch's owning task paused after its cores are released."""
         async with self.db.session() as session:
             rows = list((await session.scalars(select(Study).where(Study.task == task))).all())
         for row in rows:
@@ -142,8 +141,13 @@ class AppState:
     # -- lifecycle -------------------------------------------------------
 
     async def startup(self) -> None:
-        await self.db.create_all()
+        # The catalog's single-writer lock is this process's claim on the data directory, so it
+        # comes first: a second backend must fail here, before it backs up or migrates.
         await self.catalog.open()
+        await asyncio.to_thread(snapshot, self.settings.sqlite_path, updates.current())
+        await self.db.create_all()
+        preferences.apply(self, await preferences.load(self.db))
+        await self.models.load()
         # A catalog downloaded before the search index existed still has none; building it
         # costs a couple of seconds and nothing else depends on it, so it must not block.
         if not await search.ready(self.catalog):
@@ -206,7 +210,7 @@ class AppState:
             ids = (
                 await session.scalars(
                     select(SimulationRecord.alpha_id).where(
-                        SimulationRecord.status == SimStatus.COMPLETE,
+                        SimulationRecord.status.in_([SimStatus.COMPLETE, SimStatus.WARNING]),
                         SimulationRecord.alpha_id.is_not(None),
                         SimulationRecord.finished_at >= since,
                     )

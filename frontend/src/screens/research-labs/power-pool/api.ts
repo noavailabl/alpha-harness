@@ -2,6 +2,7 @@
 
 import type { components } from '@/api/generated'
 import { http } from '@/api/http'
+import type { FieldFilterState } from '@/screens/data/state'
 
 type Schemas = components['schemas']
 
@@ -13,6 +14,8 @@ export interface PowerPoolRequest {
   delay: number
   universe: string
   dataset_ids: string[]
+  /** The Data Explorer's filter the datasets were chosen under; `null` uses every field. */
+  field_filter?: FieldFilterState | null
   model: string | null
   /** Empty keeps every neutralization BRAIN offers for the market. */
   neutralizations: string[]

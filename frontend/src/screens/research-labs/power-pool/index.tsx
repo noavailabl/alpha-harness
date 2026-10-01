@@ -1,15 +1,18 @@
 /** LLM Power Pool Lab: an LLM writes Power Pool Alphas for your datasets while the task runs in Tasks. */
 
 import { useQuery } from '@tanstack/react-query'
-import { PlusIcon } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { fmt } from '@/lib/format'
+import { useCores } from '@/lib/preferences'
 import { DEFAULT_SCOPE, useScopeOptions } from '@/lib/scope'
+import { useProviderLabel } from '@/screens/ai/shared'
+import type { FieldFilterState } from '@/screens/data/state'
+import { AddTaskButtons, useAddTask } from '@/screens/research-labs/add-task'
 import {
   MAX_SIMULATIONS,
   simulationsValid,
-  useAddTask,
   useLabMarket,
   useLabPreview,
 } from '@/screens/research-labs/lab-task'
@@ -38,7 +41,9 @@ interface PowerPoolDraft {
   delay: number
   universe: string
   datasetIds: string[]
-  cores: number
+  fieldFilter: FieldFilterState | null
+  /** `null` until chosen in the form: until then Settings' default applies. */
+  cores: number | null
   simulations: number | null
   model: string | null
   /** Empty keeps every neutralization BRAIN offers for the market. */
@@ -52,12 +57,18 @@ const useDraft = create<PowerPoolDraft>()(
       delay: DEFAULT_SCOPE.delay,
       universe: DEFAULT_SCOPE.universe,
       datasetIds: [],
-      cores: 4,
+      fieldFilter: null,
+      cores: null,
       simulations: null,
       model: null,
       neutralizations: [],
     }),
-    { name: 'alpha-harness-power-pool-lab' },
+    {
+      name: 'alpha-harness-power-pool-lab',
+      // Version 1 leaves cores unchosen, so Settings' default for new tasks applies.
+      version: 1,
+      migrate: (stored) => ({ ...(stored as PowerPoolDraft), cores: null }),
+    },
   ),
 )
 
@@ -67,14 +78,15 @@ const PRE =
 export function PowerPoolLabScreen() {
   const draft = useDraft()
   const set = useDraft.setState
-  const { names, choose } = useLabMarket(draft, set, '/labs/power-pool')
+  const { scope, choose } = useLabMarket(draft, set, '/labs/power-pool')
   const options = useQuery({
     queryKey: ['power-pool-lab', 'options'],
     queryFn: powerPoolLab.options,
   })
   const models = options.data?.models ?? []
+  const providerLabel = useProviderLabel()
   const model =
-    draft.model && models.some((m) => m.id === draft.model)
+    draft.model && models.some((m) => m.ref === draft.model)
       ? draft.model
       : (options.data?.defaultModel ?? null)
 
@@ -86,14 +98,16 @@ export function PowerPoolLabScreen() {
     universe: draft.universe,
   })
 
+  const cores = useCores(draft.cores)
   const body: PowerPoolRequest = {
     region: draft.region,
     delay: draft.delay,
     universe: draft.universe,
     dataset_ids: draft.datasetIds,
+    field_filter: draft.fieldFilter ?? null,
     model,
     neutralizations: draft.neutralizations,
-    cores: draft.cores,
+    cores,
     simulations: draft.simulations ?? 0,
   }
   const { preview, current } = useLabPreview('power-pool-lab', body, powerPoolLab.preview)
@@ -110,27 +124,30 @@ export function PowerPoolLabScreen() {
     <Page>
       <PageHeader
         title="LLM Power Pool Lab"
-        actions={
-          <Button
-            variant="primary"
-            disabled={!ready}
-            loading={add.isPending}
-            onClick={() => add.mutate()}
-          >
-            <PlusIcon />
-            Add Task
-          </Button>
-        }
+        actions={<AddTaskButtons add={add} disabled={!ready} />}
       />
       {options.isError && <ErrorNotice error={options.error} title="Could not load the models" />}
       {options.isSuccess && models.length === 0 && (
-        <Notice tone="warn" title="Add a Key in LLM Integration to use this lab." />
+        <Notice
+          tone="warn"
+          title="This lab needs a model"
+          action={
+            <Button size="sm" render={<Link to="/ai/$tab" params={{ tab: 'models' }} />}>
+              Set up a model
+            </Button>
+          }
+        >
+          Add a Key in LLM Integration and set up a model for it, with the limits your provider
+          shows you.
+        </Notice>
       )}
       <DatasetsPanel
         ids={draft.datasetIds}
-        names={names}
+        scope={scope}
         onChoose={choose}
-        onRemove={(id) => set({ datasetIds: draft.datasetIds.filter((x) => x !== id) })}
+        filter={draft.fieldFilter}
+        onClearFilter={() => set({ fieldFilter: null })}
+        onRemove={(ids) => set({ datasetIds: draft.datasetIds.filter((x) => !ids.includes(x)) })}
       />
       <Panel title="Settings">
         <div className="flex flex-col gap-4">
@@ -139,19 +156,19 @@ export function PowerPoolLabScreen() {
               <Select
                 label="Model"
                 items={models.map((m) => ({
-                  value: m.id,
+                  value: m.ref,
                   label:
                     m.provider === 'codex'
-                      ? `${m.label} · Medium · ChatGPT allowance`
+                      ? `${m.id} · Medium · ChatGPT allowance`
                       : m.provider === 'claude'
-                        ? `${m.label} · Medium · Claude allowance`
-                        : `${m.label} · ${fmt.int(m.remainingToday)} left today`,
+                        ? `${m.id} · Medium · Claude allowance`
+                        : `${m.id} · ${providerLabel(m.provider)} · ${fmt.int(m.remainingToday)} left today`,
                 }))}
                 value={model}
                 onChange={(v) => set({ model: v })}
               />
             </Fieldset>
-            <CoresSetting value={draft.cores} onChange={(cores) => set({ cores })} />
+            <CoresSetting value={cores} onChange={(next) => set({ cores: next })} />
             <SimulationsSetting
               value={draft.simulations}
               max={maxSimulations}
@@ -164,7 +181,6 @@ export function PowerPoolLabScreen() {
               available={scopeOptions.neutralizations}
               value={draft.neutralizations}
               onChange={(next) => set({ neutralizations: next })}
-              hint="None chosen draws from every one BRAIN offers here."
             />
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

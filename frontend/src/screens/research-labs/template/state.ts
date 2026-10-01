@@ -52,12 +52,15 @@ export const useTemplateLab = create<TemplateDraft & Actions>()(
     }),
     {
       name: 'alpha-harness-template-lab',
-      version: 1,
+      // Version 2 leaves cores unchosen, so Settings' default for new tasks applies.
+      version: 2,
+      migrate: (stored) => ({ ...(stored as TemplateDraft), cores: null }),
       partialize: (s) => ({
         region: s.region,
         delay: s.delay,
         universe: s.universe,
         datasetIds: s.datasetIds,
+        fieldFilter: s.fieldFilter,
         cores: s.cores,
         simulations: s.simulations,
         decay: s.decay,

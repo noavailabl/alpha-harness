@@ -13,17 +13,24 @@ import {
   StarIcon,
   Trash2Icon,
 } from 'lucide-react'
-import { type ComponentProps, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { cn } from '@/lib/cn'
 import { DASH, fmt } from '@/lib/format'
 import { useNow } from '@/lib/now'
 import { useRefetchOn } from '@/lib/ws'
+import { DatasetChips, useDatasetTree } from '@/screens/data/dataset-chips'
 import { DetailSheet } from '@/screens/pool/detail'
 import { MAX_SIMULATIONS } from '@/screens/research-labs/lab-task'
-import { type LabTask, labTasks, type RankedAlpha, type TaskStatus } from '@/screens/tasks/api'
-import { AFTER_COST_HEADER, DELAY, INVESTABILITY, SharpeCell } from '@/screens/tasks/columns'
+import { type LabTask, labTasks, type RankedAlpha } from '@/screens/tasks/api'
+import {
+  AFTER_COST_HEADER,
+  DELAY,
+  INVESTABILITY,
+  SharpeCell,
+  taskStatus,
+} from '@/screens/tasks/columns'
 import { resultsMarkdown } from '@/screens/tasks/copy'
 import { SubmittableAlphas } from '@/screens/tasks/submittable'
 import {
@@ -51,15 +58,6 @@ import { type Column, DataTable } from '@/ui/table'
 
 /** Matches `labs.params.SETTINGS_SAMPLER`. */
 const SETTINGS_SAMPLER = 'settings-sampler'
-
-const STATUS: Record<TaskStatus, { label: string; tone: ComponentProps<typeof Badge>['tone'] }> = {
-  IDLE: { label: 'Not Started', tone: 'outline' },
-  QUEUED: { label: 'Waiting', tone: 'warn' },
-  RUNNING: { label: 'Running', tone: 'profit' },
-  PAUSED: { label: 'Paused', tone: 'muted' },
-  COMPLETE: { label: 'Complete', tone: 'neutral' },
-  FAILED: { label: 'Failed', tone: 'loss' },
-}
 
 const TOP_COLUMNS: Column<RankedAlpha>[] = [
   {
@@ -258,8 +256,13 @@ export function TasksScreen() {
             {/* A sweep spans many markets, so naming the source Alpha's one would mislead. */}
             {t.lab === SETTINGS_SAMPLER ? (
               <>
-                {' · '}
-                <span className="num">{t.alphaId ?? DASH}</span>
+                {/* A sweep started from a typed expression has no source Alpha: "" not null. */}
+                {t.alphaId && (
+                  <>
+                    {' · '}
+                    <span className="num">{t.alphaId}</span>
+                  </>
+                )}
                 {' · '}
                 <span className="num">{fmt.int(t.markets)}</span>
                 {t.markets === 1 ? ' Market' : ' Markets'}
@@ -493,10 +496,7 @@ function confirmCopy(a: Act, fresh: number): { title: string; label: string; bod
 }
 
 function TaskBadge({ task }: { task: LabTask }) {
-  const { label, tone } =
-    task.stopping && task.status === 'RUNNING'
-      ? { label: 'Stopping', tone: 'warn' as const }
-      : (STATUS[task.status] ?? STATUS.IDLE)
+  const { label, tone } = taskStatus(task)
   return <Badge tone={tone}>{label}</Badge>
 }
 
@@ -650,7 +650,7 @@ function TaskDetail({
         `${fmt.int(task.markets)} Markets · Decay ${task.decay ?? DASH} · Truncation ${task.truncation ?? DASH} · NaN Handling ${task.nanHandling ?? DASH}`
       : task.seeds > 0
         ? `${task.universe ?? DASH} · ${fmt.int(task.seeds)} seeds · Population ${fmt.int(task.population)} · Mutation ${fmt.pct(task.mutationRate, 0)}`
-        : `Decay ${task.decay ?? DASH} · ${fmt.int(task.fields)} fields · ${task.datasetIds.join(', ')}`
+        : `Decay ${task.decay ?? DASH} · ${fmt.int(task.fields)} fields`
   const copyResults = () =>
     navigator.clipboard.writeText(resultsMarkdown(task, rows)).then(
       () => toast.success(`Copied ${fmt.int(rows.length)} results`),
@@ -672,6 +672,7 @@ function TaskDetail({
       }
     >
       <div className="flex flex-col gap-4">
+        <TaskDatasets task={task} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric
             boxed
@@ -747,9 +748,9 @@ function TaskDetail({
           // A two-column grid rather than padded text: the equals signs line up whatever the
           // labels are and whatever the font does.
           <p className="num grid w-fit grid-cols-[auto_auto] gap-x-2 gap-y-0.5 text-body-compact text-ink-subtle">
-            <span className="text-pnl-positive">GREEN</span>
+            <span className="text-pnl-positive-text">GREEN</span>
             <span>= PASS or WARNING or PENDING</span>
-            <span className="text-pnl-negative">RED</span>
+            <span className="text-pnl-negative-text">RED</span>
             <span>= FAIL or ERROR</span>
           </p>
         )}
@@ -759,6 +760,18 @@ function TaskDetail({
 }
 
 /** Its own component so the clock re-renders one box a second, not the task and its table. */
+/** The datasets a task searches, placed in its market's catalog. */
+function TaskDatasets({ task }: { task: LabTask }) {
+  const { region, delay, universe, datasetIds } = task
+  const scope =
+    region && delay !== null && universe && datasetIds.length > 0
+      ? { instrumentType: 'EQUITY', region, delay, universe }
+      : null
+  const { tree, nameOf, ready } = useDatasetTree(scope)
+  if (datasetIds.length === 0) return null
+  return <DatasetChips tree={tree} value={datasetIds} nameOf={nameOf} ready={ready} />
+}
+
 function Elapsed({ task, done }: { task: LabTask; done: boolean }) {
   // Ticking while there is something to tick: a finished task's elapsed time is fixed, and a
   // timer behind it would wake the page every second to redraw the same string.

@@ -25,6 +25,7 @@ import {
   metricHeader,
   SETTING_COLUMNS,
   setting,
+  taskStatus,
 } from '@/screens/tasks/columns'
 import { Button, Empty, ErrorNotice, KV, Metric, Page, PageHeader, Panel, Skeleton } from '@/ui/kit'
 import { type Column, DataTable, type Sort } from '@/ui/table'
@@ -115,7 +116,7 @@ function CheckSets({ rows }: { rows: RankedAlpha[] }) {
               s.checks.length === 0 ? (
                 <span className="text-ink-subtle">{DASH}</span>
               ) : (
-                <span className="num truncate text-pnl-negative" title={s.checks.join(', ')}>
+                <span className="num truncate text-pnl-negative-text" title={s.checks.join(', ')}>
                   {s.checks.join(', ')}
                 </span>
               ),
@@ -135,7 +136,7 @@ function CheckSets({ rows }: { rows: RankedAlpha[] }) {
             align: 'right',
             sortable: true,
             cell: (s) => (
-              <span className={cn('num', s.checks.length === 0 && 'text-pnl-positive')}>
+              <span className={cn('num', s.checks.length === 0 && 'text-pnl-positive-text')}>
                 {fmt.int(s.alphas)}
               </span>
             ),
@@ -160,11 +161,11 @@ export function TaskResultsScreen() {
   const id = Number(taskId)
   const [sort, setSort] = useState<Sort>({ key: 'sharpe', desc: true })
 
-  const tasks = useQuery({ queryKey: ['tasks'], queryFn: labTasks.list })
+  const tasks = useQuery({ queryKey: ['lab-tasks'], queryFn: labTasks.list })
   const task = tasks.data?.tasks.find((t) => t.id === id)
 
   const top = useQuery({
-    queryKey: ['tasks', id, 'results'],
+    queryKey: ['lab-tasks', id, 'results'],
     queryFn: () => labTasks.top(id, LIMIT),
     enabled: Number.isFinite(id),
   })
@@ -220,7 +221,7 @@ export function TaskResultsScreen() {
 
   // The download reports progress through the task registry, so the rows refresh as its
   // broadcasts land rather than on a timer of their own.
-  useRefetchOn('tasks', ['tasks', id, 'results'], 5000)
+  useRefetchOn('tasks', ['lab-tasks', id, 'results'], 5000)
 
   const green = rows.filter((r) => r.submittable || r.pending).length
   const pending = rows.filter((r) => r.pending).length
@@ -233,7 +234,7 @@ export function TaskResultsScreen() {
         // where this task got to.
         description={
           task
-            ? `${task.status}${task.alphaId ? ` · ${task.alphaId}` : ''}`
+            ? `${taskStatus(task).label}${task.alphaId ? ` · ${task.alphaId}` : ''}`
             : 'Every Alpha this task produced'
         }
         actions={
@@ -313,7 +314,7 @@ export function TaskResultsScreen() {
                 width: 'minmax(96px,1fr)',
                 align: 'right',
                 cell: (r) => (
-                  <span className={cn('num', r.submittable > 0 && 'text-pnl-positive')}>
+                  <span className={cn('num', r.submittable > 0 && 'text-pnl-positive-text')}>
                     {fmt.int(r.submittable)}
                   </span>
                 ),
@@ -324,7 +325,7 @@ export function TaskResultsScreen() {
                 width: 'minmax(84px,0.8fr)',
                 align: 'right',
                 cell: (r) => (
-                  <span className={cn('num', r.failed > 0 && 'text-pnl-negative')}>
+                  <span className={cn('num', r.failed > 0 && 'text-pnl-negative-text')}>
                     {fmt.int(r.failed)}
                   </span>
                 ),

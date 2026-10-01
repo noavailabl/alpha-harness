@@ -3,10 +3,10 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { CopyIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { type AlphaCheck, scopeLabel } from '@/api/types'
+import { type AlphaCheck, type Scope, scopeLabel } from '@/api/types'
 import { cn } from '@/lib/cn'
 import { fmt, isNum } from '@/lib/format'
-import { useScope } from '@/lib/scope'
+import { marketKey, useScope } from '@/lib/scope'
 import { useRefetchOn } from '@/lib/ws'
 import {
   type AlphaSettings,
@@ -16,6 +16,7 @@ import {
 } from '@/screens/pool/api'
 import { Sparkline } from '@/screens/pool/pnl-chart'
 import {
+  Badge,
   Button,
   checkTone,
   Disclosure,
@@ -90,7 +91,9 @@ export function Submittable({ onOpen }: { onOpen: (alphaId: string) => void }) {
           ))}
         </div>
       ) : data && data.alphas.length === 0 ? (
-        <Empty title={`No submittable Alphas in ${scopeLabel(scope)}`} />
+        <Empty title={`No submittable Alphas in ${scopeLabel(scope)}`}>
+          <Elsewhere onPick={setScope} />
+        </Empty>
       ) : (
         data && (
           <>
@@ -127,6 +130,41 @@ export function Submittable({ onOpen }: { onOpen: (alphaId: string) => void }) {
         )
       )}
     </Panel>
+  )
+}
+
+/** An empty market is often not an empty pool: the sidebar counts every market, this tab one. */
+function Elsewhere({ onPick }: { onPick: (scope: Scope) => void }) {
+  const everywhere = useQuery(pool.everywhere)
+  const markets = everywhere.data?.markets ?? []
+  if (markets.length === 0) return null
+  const total = everywhere.data?.total ?? 0
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <p>
+        <span className="num">{fmt.int(total)}</span> {total === 1 ? 'is' : 'are'} in other markets:
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        {markets.map((m) => (
+          <Button
+            key={marketKey(m)}
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              onPick({
+                instrumentType: m.instrumentType,
+                region: m.region,
+                delay: m.delay,
+                universe: m.universe,
+              })
+            }
+          >
+            <span className="num">{scopeLabel(m)}</span>
+            <Badge tone="profit">{fmt.int(m.count)}</Badge>
+          </Button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -217,8 +255,8 @@ function Card({
       )}
       {passed.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {passed.map((c) => (
-            <CheckBadge key={c.name} check={c} />
+          {passed.map((c, i) => (
+            <CheckBadge key={`${c.name}-${i}`} check={c} />
           ))}
         </div>
       )}
@@ -255,8 +293,10 @@ function CheckBadge({ check }: { check: AlphaCheck }) {
         <span
           className={cn(
             'mono-metric inline-flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-caption',
-            tone === 'profit' && 'border-pnl-positive-edge bg-pnl-positive-tint text-pnl-positive',
-            tone === 'loss' && 'border-pnl-negative-edge bg-pnl-negative-tint text-pnl-negative',
+            tone === 'profit' &&
+              'border-pnl-positive-edge bg-pnl-positive-tint text-pnl-positive-text',
+            tone === 'loss' &&
+              'border-pnl-negative-edge bg-pnl-negative-tint text-pnl-negative-text',
             tone === 'warn' &&
               'border-status-warning-edge bg-status-warning-tint text-status-warning',
             (tone === 'neutral' || tone === 'muted') &&

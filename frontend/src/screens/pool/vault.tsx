@@ -65,7 +65,7 @@ export function AlphaCounts() {
   })
   const liveTasks = useLive((s) => s.tasks)
   const polled = useQuery({
-    queryKey: ['pool', 'tasks'],
+    queryKey: ['background-tasks'],
     queryFn: tasks.list,
     enabled: liveTasks == null,
     refetchInterval: 5000,
@@ -113,7 +113,7 @@ export function AlphaCounts() {
                   <span
                     className={
                       t.state === 'failed'
-                        ? 'min-w-0 break-words text-pnl-negative'
+                        ? 'min-w-0 break-words text-pnl-negative-text'
                         : 'min-w-0 text-ink-subtle'
                     }
                   >

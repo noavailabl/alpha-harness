@@ -6,8 +6,6 @@ maxTrade/maxPosition pair. A market only counts when every data field the expres
 is downloaded there, so a two-field Alpha is judged on the intersection.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import math
@@ -28,7 +26,7 @@ from ..brain.schemas import (
 )
 from ..brain.settings_schema import valid_values
 from ..db.models import MetadataCache, StudyStatus, Trial, TrialState, utcnow
-from ..engine.lifecycle import extract_simulation_id
+from ..engine.lifecycle import RA_CHILDREN, extract_simulation_id
 from ..engine.packer import MAX_BATCH
 from ..labs import scheduler
 from ..labs.fastexpr import GROUPING, ParseError, data_fields, parse
@@ -39,12 +37,11 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-#: Parks a written simulation outside every count until a core is free.
-PENDING_SEND = "Waiting for cores."
+PENDING_SEND = scheduler.PENDING_SEND
 
 #: Which regions accept Max Position is not in any schema, so it is measured. It changes only
 #: when BRAIN adds a market, so the answer keeps for a day.
-POSITION_CACHE_KEY = "max_position_regions"
+POSITION_CACHE_KEY = "max_position_regions_v2"
 POSITION_MAX_AGE = timedelta(hours=24)
 #: Probes in flight at once. Measured 3.3x faster than one at a time with no throttling, but
 #: bounded so the burst does not grow with the number of markets BRAIN offers.
@@ -97,8 +94,7 @@ async def _probe_regions(state: Any) -> set[str]:
     if not schema:
         return set()
     base = {"instrumentType": "EQUITY"}
-    # All regions never reaches the sampler (see `_plan`), so there is nothing to probe.
-    regions = [str(r) for r in valid_values(schema, "region", base) if r != REGION_AGNOSTIC_REGION]
+    regions = [str(r) for r in valid_values(schema, "region", base)]
     gate = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     async def ask(region: str) -> bool | None:
@@ -229,11 +225,7 @@ async def plan(
         here = {
             (str(r["region"]), int(r["delay"]), str(r["universe"])): float(r["coverage"] or 0.0)
             for r in rows
-            # All regions is left out: the catalog holds it once it has been synced, but a
-            # sweep there sends region-agnostic simulations, which cost four of the day's
-            # allowance each. A sampler that quietly spends four times its estimate is worse
-            # than one that does not offer the market.
-            if r["instrument_type"] == "EQUITY" and r["region"] != REGION_AGNOSTIC_REGION
+            if r["instrument_type"] == "EQUITY"
         }
         if not here:
             problems.append(f"{field} is not downloaded in any market. Sync from BRAIN first.")
@@ -306,6 +298,9 @@ def _regions(
                 "neutralizations": neutralizations,
                 "pairs": [{"maxTrade": t, "maxPosition": p} for t, p in pairs],
                 "positionAvailable": region in accepts,
+                # All regions sends region-agnostic simulations, each charged per region it
+                # reaches. Said per region so every estimate can count it, not hide it.
+                "cost": simulation_cost(region),
                 "markets": markets,
                 "total": sum(int(m["total"]) for m in markets),
             }
@@ -315,6 +310,16 @@ def _regions(
     return out
 
 
+def simulation_cost(region: str) -> int:
+    """Simulations of the day's allowance one run in this region uses."""
+    return RA_CHILDREN if region == REGION_AGNOSTIC_REGION else 1
+
+
+def batch_size(region: str) -> int:
+    """How many runs one multi-simulation carries: BRAIN fails a batch of region-agnostic ones."""
+    return 1 if region == REGION_AGNOSTIC_REGION else MAX_BATCH
+
+
 def _totals(regions: list[dict[str, Any]]) -> dict[str, Any]:
     batches = 0
     for region in regions:
@@ -322,8 +327,9 @@ def _totals(regions: list[dict[str, Any]]) -> dict[str, Any]:
         for market in region["markets"]:
             delay = int(market["delay"])
             per_delay[delay] = per_delay.get(delay, 0) + int(market["total"])
-        batches += sum(math.ceil(n / MAX_BATCH) for n in per_delay.values())
-    return {"total": sum(int(r["total"]) for r in regions), "batches": batches}
+        size = batch_size(str(region["region"]))
+        batches += sum(math.ceil(n / size) for n in per_delay.values())
+    return {"total": sum(int(r["total"]) * int(r["cost"]) for r in regions), "batches": batches}
 
 
 def _settings(source: dict[str, Any]) -> dict[str, Any]:

@@ -1,21 +1,24 @@
-/** What the labs share around a task: its draft, market and datasets, its preview, adding it. */
+/** What the labs share around a task: its draft, market and datasets, and its preview. */
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useMemo } from 'react'
-import { toast } from 'sonner'
-import { catalog } from '@/api/catalog'
+import { useEffect } from 'react'
 import type { Scope } from '@/api/types'
 import { DEFAULT_SCOPE, useScope } from '@/lib/scope'
 import { useDebounced } from '@/lib/use-debounced'
 import { type PickFrom, useDatasetPick } from '@/screens/data/dataset-pick'
+import { type FieldFilterState, useFieldFilter } from '@/screens/data/state'
 
 export interface LabDraft {
   region: string
   delay: number
   universe: string
   datasetIds: string[]
-  cores: number
+  /** The Data Explorer's filter the datasets were chosen under: the lab uses only the fields it
+   *  shows. `null` uses every field in them; a draft saved before labs kept one has none. */
+  fieldFilter: FieldFilterState | null
+  /** `null` until chosen in the form: until then Settings' default applies. */
+  cores: number | null
   /** `null` until the user assigns them: a task always has simulations chosen on purpose. */
   simulations: number | null
   decay: number
@@ -30,7 +33,8 @@ export const LAB_DEFAULTS: LabDraft = {
   delay: DEFAULT_SCOPE.delay,
   universe: DEFAULT_SCOPE.universe,
   datasetIds: [],
-  cores: 4,
+  fieldFilter: null,
+  cores: null,
   simulations: null,
   decay: 0,
   vectorOperators: null,
@@ -39,8 +43,8 @@ export const LAB_DEFAULTS: LabDraft = {
 
 export const MAX_SIMULATIONS = 100_000
 
-/** A draft's market and datasets: dataset names, and the round trip to the Data Explorer to choose them. */
-type LabMarket = Pick<LabDraft, 'region' | 'delay' | 'universe' | 'datasetIds'>
+/** A draft's market and datasets, and the round trip to the Data Explorer to choose them. */
+type LabMarket = Pick<LabDraft, 'region' | 'delay' | 'universe' | 'datasetIds' | 'fieldFilter'>
 
 export function useLabMarket(
   draft: LabMarket,
@@ -66,25 +70,18 @@ export function useLabMarket(
         delay: pick.scope.delay,
         universe: pick.scope.universe,
         datasetIds: pick.ids,
+        fieldFilter: pick.extra ?? null,
       })
   }, [from, set])
 
-  const datasets = useQuery({
-    queryKey: ['catalog', 'datasets', scope, ''],
-    queryFn: () => catalog.datasets(scope),
-    enabled: chosen,
-  })
-  const names = useMemo(
-    () => new Map((datasets.data ?? []).map((d) => [d.dataset_id, d.name ?? d.dataset_id])),
-    [datasets.data],
-  )
-
   const choose = () => {
+    // Back to the filter this lab applies, so the Explorer shows the fields it will use.
+    if (draft.fieldFilter) useFieldFilter.getState().replace({ ...draft.fieldFilter })
     useDatasetPick.getState().start(scope, draft.datasetIds, from)
     setDataScope(scope)
     void navigate({ to: '/data' })
   }
-  return { chosen, names, choose }
+  return { chosen, scope, choose }
 }
 
 /**
@@ -108,41 +105,23 @@ export function useLabPreview<Body, Plan>(
   return { preview: query, current: settled === key && !query.isFetching }
 }
 
-/** Adds a task, then offers the way to it. */
-export function useAddTask<Value = void>(
-  add: (value: Value) => Promise<unknown>,
-  done = 'Task Added',
-) {
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: add,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['lab-tasks'] })
-      void queryClient.invalidateQueries({ queryKey: ['today'] })
-      toast.success(done, {
-        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
-      })
-    },
-  })
-}
-
 /** `vec_avg` until the user chooses vector operators. */
 export function vectorOperatorsOf(draft: LabDraft, available: string[] | undefined): string[] {
   return draft.vectorOperators ?? (available?.includes('vec_avg') ? ['vec_avg'] : [])
 }
 
 /** The market and settings both labs send to preview a task. */
-export function labBody(draft: LabDraft, vectorOperators: string[]) {
+export function labBody(draft: LabDraft, vectorOperators: string[], cores: number) {
   return {
     region: draft.region,
     delay: draft.delay,
     universe: draft.universe,
     dataset_ids: draft.datasetIds,
+    field_filter: draft.fieldFilter ?? null,
     vector_operators: vectorOperators,
     neutralizations: draft.neutralizations,
     decay: draft.decay,
-    cores: draft.cores,
+    cores,
   }
 }
 

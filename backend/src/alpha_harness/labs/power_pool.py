@@ -6,8 +6,6 @@ BRAIN counts them), given a random universe, neutralization and decay, and kept 
 waiting trial until cores are free. Calls never happen inside ``advance``.
 """
 
-from __future__ import annotations
-
 import json
 import random
 import time
@@ -18,6 +16,7 @@ import structlog
 from sqlalchemy import func, or_, select
 
 from ..brain.schemas import REGION_AGNOSTIC_REGION, SimulationSettings
+from ..catalog.queries import CatalogQueries, FieldFilter, Tuple4
 from ..db.models import Study, StudyStatus, Trial, TrialState, utcnow
 from ..llm.keys import BudgetExhaustedError, LLMError
 from ..llm.prompts import POWER_POOL_LAB
@@ -44,7 +43,6 @@ if TYPE_CHECKING:  # pragma: no cover
     import asyncio
 
     from ..db.duck import Catalog
-    from ..llm.registry import ModelInfo
     from .study import Optimizer
 
 log = structlog.get_logger(__name__)
@@ -105,7 +103,12 @@ class Context:
 
 
 async def context_for(
-    catalog: Catalog, region: str, delay: int, universes: list[str], dataset: str
+    catalog: Catalog,
+    region: str,
+    delay: int,
+    universes: list[str],
+    dataset: str,
+    narrow: FieldFilter | None = None,
 ) -> Context | None:
     marks = ", ".join("?" for _ in universes)
     extra = (*DATA_FIELDS, *GROUPING)
@@ -136,6 +139,19 @@ async def context_for(
         if best is None or rank[str(r["universe"])] < rank[str(best["universe"])]:
             info[field_id] = r
     own = {f for f, r in info.items() if r["dataset_id"] == dataset}
+    if narrow is not None:
+        # Only what the Data Explorer showed when the dataset was chosen, read through its query.
+        queries = CatalogQueries(catalog)
+        shown: set[str] = set()
+        for universe in universes:
+            page = await queries.fields(
+                Tuple4(region=region, delay=delay, universe=universe),
+                narrow.model_copy(
+                    update={"dataset_ids": [dataset], "limit": search.POOL_LIMIT, "offset": 0}
+                ),
+            )
+            shown.update(str(r["field_id"]) for r in page.get("results") or [])
+        own &= shown
 
     def field(f: str) -> Field:
         r = info[f]
@@ -290,14 +306,9 @@ def memory_text(done: list[Any], waiting: list[Any], thrown: list[Any]) -> str:
     return "\n".join(parts) or "None yet."
 
 
-def budget_for(model: ModelInfo) -> int:
-    return min(40_000, int(model.tpm * 0.6))
-
-
 #: What a model cannot infer from the market line when the region is ALL. The warning about
-#: cross-sectional comparison is BRAIN's own ("Tips for Success",
-#: ``docs/learn/advanced-topics/region-agnostic-alpha``): one expression is translated into
-#: four markets whose currencies, market caps and face values are not on one scale.
+#: cross-sectional comparison is BRAIN's own: one expression is translated into four
+#: markets whose currencies, market caps and face values are not on one scale.
 REGION_AGNOSTIC_BRIEF = """
 This expression runs in USA, Europe, Asia and Global at once, and the alpha is submittable
 where two or more of them hold up. Two fields combine only where their regions overlap, so
@@ -413,16 +424,22 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
         by = dict(llm.get("byDataset") or {})
         ids = run.dataset_ids
         dataset = min(ids, key=lambda d: (by.get(d, {}).get("calls", 0), ids.index(d)))
-        model = optimizer.llm.model_for(run.model)
+        model = optimizer.llm.registry.get(run.model)
         operators = await optimizer.metadata.cached_operators() or []
         ctx = await context_for(
-            optimizer.alphas.catalog, run.region, run.delay, run.universes, dataset
+            optimizer.alphas.catalog,
+            run.region,
+            run.delay,
+            run.universes,
+            dataset,
+            FieldFilter.model_validate(run.field_filter) if run.field_filter else None,
         )
         if model is None:
             return await _pause(
                 optimizer,
                 study_id,
-                f"{run.model} is no longer offered. Add a new task with another model.",
+                f"{run.model} is no longer set up. Set it up again under LLM Integration › "
+                "Models, then resume.",
             )
         if not operators:
             return await _pause(
@@ -439,7 +456,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
 
         memory = await memory_of(optimizer, study_id, dataset)
         offset = int(by.get(dataset, {}).get("offset", 0))
-        user, shown = user_prompt(ctx, operators, run, memory, offset, budget_for(model))
+        user, shown = user_prompt(ctx, operators, run, memory, offset, model.prompt_tokens)
         entry: dict[str, Any] = {
             "at": utcnow().isoformat(),
             "dataset": dataset,
@@ -453,7 +470,7 @@ async def _write(optimizer: Optimizer, study_id: int) -> None:
             answer = await optimizer.llm.generate(
                 system=POWER_POOL_LAB,
                 user=user,
-                model_id=model.id,
+                model_ref=model.ref,
                 response_schema=SCHEMA,
                 temperature=1.0,
                 thinking=run.effort,

@@ -6,8 +6,6 @@ survive a read and a write (``extra="allow"``), and every field a reader used to
 still defaults here. Only what a lab cannot run without is required.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
@@ -83,6 +81,8 @@ class PowerPoolParams(TaskParams):
     neutralizations: list[str]
     universe: str | None = None
     dataset_ids: list[str] = Field(default_factory=list)
+    #: The Data Explorer's filter the datasets were chosen under, applied on every call.
+    field_filter: dict[str, Any] | None = None
     model: str = ""
     #: GPT models always run at Medium; stored so task details remain auditable.
     effort: str | None = None

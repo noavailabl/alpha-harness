@@ -29,6 +29,9 @@
   --spec-ink-tertiary: #52565e;
   --spec-pnl-positive: #27a644;
   --spec-pnl-negative: #e5484d;
+  /* The sign's hues lifted until a figure clears APCA Lc 60 on every surface it sits on. */
+  --spec-pnl-positive-text: #54cb67;
+  --spec-pnl-negative-text: #ff9792;
   --spec-status-running: #3b82f6;
   --spec-status-queued: #8a8f98;
   --spec-status-warning: #f59e0b;
@@ -75,7 +78,13 @@
   --color-white: var(--white);
   --color-black: var(--black);
 
-  /* Elevation by surface steps, not shadow. */
+  /* In-flow elevation is a surface step. Only what floats over the page casts a shadow, and
+     it is this one: Tailwind's scale is dropped so no other can slip in. */
+  --shadow-*: initial;
+  --shadow-float:
+    0 8px 24px -6px color-mix(in oklab, var(--black) 70%, transparent),
+    0 2px 6px color-mix(in oklab, var(--black) 45%, transparent);
+
   --color-canvas: var(--spec-canvas);
   --color-surface-1: var(--spec-surface-1);
   --color-surface-2: var(--spec-surface-2);
@@ -118,6 +127,8 @@
 
   --color-pnl-positive: var(--spec-pnl-positive);
   --color-pnl-negative: var(--spec-pnl-negative);
+  --color-pnl-positive-text: var(--spec-pnl-positive-text);
+  --color-pnl-negative-text: var(--spec-pnl-negative-text);
   --color-status-running: var(--spec-status-running);
   --color-status-queued: var(--spec-status-queued);
   --color-status-warning: var(--spec-status-warning);

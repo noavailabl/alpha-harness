@@ -164,7 +164,7 @@ export function WorkInFlight() {
 function TasksSummary() {
   const live = useLive((s) => s.tasks)
   const fallback = useQuery({
-    queryKey: ['tasks'],
+    queryKey: ['background-tasks'],
     queryFn: () => tasksApi.list(),
     enabled: live === null,
   })
@@ -183,7 +183,7 @@ function TasksSummary() {
         {summary.failed > 0 && (
           <>
             {' '}
-            · <span className="num text-pnl-negative">{fmt.int(summary.failed)}</span> failed
+            · <span className="num text-pnl-negative-text">{fmt.int(summary.failed)}</span> failed
           </>
         )}
       </p>
@@ -205,7 +205,7 @@ function TasksSummary() {
             <span
               className={
                 t.error
-                  ? 'text-body-compact text-pnl-negative'
+                  ? 'text-body-compact text-pnl-negative-text'
                   : 'text-body-compact text-ink-subtle'
               }
             >

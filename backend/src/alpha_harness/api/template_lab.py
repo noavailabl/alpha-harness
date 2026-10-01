@@ -5,8 +5,6 @@ Presets are read-only; templates the user saves live in the ``template`` table u
 every lab's task, only runs from the Tasks tab.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter
@@ -49,6 +47,14 @@ class TemplateBody(BaseModel):
 class TemplateTask(SearchRequest):
     tree: dict[str, Any]
     template_name: str = Field(default="Template", max_length=128)
+
+
+class TemplateText(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class TemplateTree(Out):
+    tree: dict[str, Any]
 
 
 class TemplateLabOptions(Out):
@@ -290,6 +296,15 @@ async def _plan(body: TemplateTask, state: Any) -> dict[str, Any]:
         "space": space,
         "tree": doc,
     }
+
+
+@router.post("/parse")
+async def parse_template(body: TemplateText) -> TemplateTree:
+    """A typed template as blocks, written the way the Expression under the blocks reads."""
+    try:
+        return TemplateTree(tree=template.parse(body.text))
+    except ValueError as exc:
+        raise refuse(422, "template_unreadable", str(exc)) from exc
 
 
 @router.post("/preview")

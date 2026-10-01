@@ -4,8 +4,6 @@ Every BRAIN failure becomes an HTTP response in exactly one place, so business l
 raise typed exceptions and never touch ``HTTPException``.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
@@ -190,6 +188,18 @@ def install_exception_handlers(app: FastAPI) -> None:
             retryAfter=round(exc.retry_after),
             model=exc.model,
             keys=[s.to_dict() for s in exc.states],
+        )
+
+    # Starlette answers anything unhandled with a bare "Internal Server Error", which leaves
+    # a bug report with nothing to go on. Naming the error is enough to find it; the
+    # traceback still reaches the log, since Starlette re-raises after this responds.
+    @app.exception_handler(Exception)
+    async def _unexpected(_r: Request, exc: Exception) -> JSONResponse:
+        return _problem(
+            500,
+            "internal_error",
+            "Alpha Harness hit an unexpected error.",
+            detail=f"{type(exc).__name__}: {exc}"[:500],
         )
 
     @app.exception_handler(BrainError)

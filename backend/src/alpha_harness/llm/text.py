@@ -1,7 +1,5 @@
 """Text going to a model and coming back: a token estimate, a clipped line, a JSON reply."""
 
-from __future__ import annotations
-
 import json
 import re
 from typing import Any

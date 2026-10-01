@@ -342,6 +342,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalog/fields/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Field Outline
+         * @description The chosen fields as compact text for an LLM, grouped as the catalog is.
+         */
+        post: operations["field_outline_api_catalog_fields_outline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalog/fields/{field_id}": {
         parameters: {
             query?: never;
@@ -622,6 +642,23 @@ export interface paths {
         post?: never;
         /** Delete Thread */
         delete: operations["delete_thread_api_chat_threads__thread_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/competitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Competitions */
+        get: operations["competitions_api_competitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1135,15 +1172,20 @@ export interface paths {
         };
         /**
          * Models
-         * @description The model roster with each one's daily budget.
-         *
-         *     Requests-per-day is the limit that ends a session, so it travels with every entry
-         *     rather than sitting in a help page.
+         * @description The models set up, each with the limits its user gave it.
          */
         get: operations["models_api_llm_models_get"];
-        put?: never;
+        /**
+         * Set Model
+         * @description Set a model up with its limits, or change the limits of one already set up.
+         */
+        put: operations["set_model_api_llm_models_put"];
         post?: never;
-        delete?: never;
+        /**
+         * Remove Model
+         * @description Query parameters, not a path: model ids carry slashes.
+         */
+        delete: operations["remove_model_api_llm_models_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1185,6 +1227,26 @@ export interface paths {
          *     payment details would turn a convenience into a purchase decision.
          */
         get: operations["providers_api_llm_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/providers/{provider}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Offered Models
+         * @description What a provider's Key can reach, asked live. Costs no generation request.
+         */
+        get: operations["offered_models_api_llm_providers__provider__models_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1308,6 +1370,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read */
+        get: operations["read_api_preferences_get"];
+        /**
+         * Write
+         * @description Replace every choice. Each takes effect at once, not after a restart.
+         */
+        put: operations["write_api_preferences_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/quarter": {
         parameters: {
             query?: never;
@@ -1404,7 +1487,7 @@ export interface paths {
         put?: never;
         /**
          * Add Task
-         * @description Add the search to Tasks, queued to run.
+         * @description Add the search to Tasks, not started. Running it is the Tasks route's job.
          */
         post: operations["add_task_api_search_lab_tasks_post"];
         delete?: never;
@@ -1536,6 +1619,26 @@ export interface paths {
         get: operations["options_api_template_lab_options_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/template-lab/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse Template
+         * @description A typed template as blocks, written the way the Expression under the blocks reads.
+         */
+        post: operations["parse_template_api_template_lab_parse_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1800,7 +1903,7 @@ export interface paths {
         };
         /**
          * Status
-         * @description Whether a newer release is out. Asked of GitHub at most once an hour.
+         * @description Whether a newer release is out. GitHub is asked only as often as Settings allow.
          */
         get: operations["status_api_update_get"];
         put?: never;
@@ -1867,9 +1970,30 @@ export interface paths {
         };
         /**
          * Alpha Detail
-         * @description One alpha with its checks and PnL curve. Downloads the daily PnL the first time.
+         * @description One stored alpha: its expression, settings and checks. Local only, so it answers at once;
+         *     the PnL comes from :func:`alpha_pnl`, which may have to download it.
          */
         get: operations["alpha_detail_api_vault_alphas__alpha_id__detail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/alphas/{alpha_id}/pnl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alpha Pnl
+         * @description One alpha's cumulative PnL. Downloads the daily PnL from BRAIN the first time.
+         */
+        get: operations["alpha_pnl_api_vault_alphas__alpha_id__pnl_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1978,16 +2102,8 @@ export interface components {
             checks: {
                 [key: string]: unknown;
             }[];
-            /** Dates */
-            dates: string[];
-            /** Days */
-            days: number;
             /** Expression */
             expression: string | null;
-            /** Pnl */
-            pnl: number[];
-            /** Problem */
-            problem: string | null;
             settings: components["schemas"]["AlphaSettings"];
         };
         /**
@@ -2134,6 +2250,17 @@ export interface components {
             /** Universes */
             universes?: string[] | null;
         };
+        /** AlphaPnl */
+        AlphaPnl: {
+            /** Dates */
+            dates: string[];
+            /** Days */
+            days: number;
+            /** Pnl */
+            pnl: number[];
+            /** Problem */
+            problem: string | null;
+        };
         /** AlphaProperties */
         AlphaProperties: {
             /** Category */
@@ -2195,6 +2322,8 @@ export interface components {
             sharpe: number | null;
             /** Shortcount */
             shortCount?: number | null;
+            /** Standingregion */
+            standingRegion?: string | null;
             /** Status */
             status: string | null;
             /** Testsharpe */
@@ -2306,10 +2435,8 @@ export interface components {
             keys: number;
             /** Requestsremainingtoday */
             requestsRemainingToday: number;
-            /** Resetsat */
-            resetsAt: string;
             /** Resetsinseconds */
-            resetsInSeconds: number;
+            resetsInSeconds: number | null;
         };
         /** AutoSeeds */
         AutoSeeds: {
@@ -2357,6 +2484,16 @@ export interface components {
         AutoSeedsStarted: {
             /** Jobid */
             jobId: string;
+        };
+        /**
+         * AvailabilityCounts
+         * @description Fields each availability toggle would show if pressed, under the other filters.
+         */
+        AvailabilityCounts: {
+            /** Region Agnostic */
+            region_agnostic: number;
+            /** Region Exclusive */
+            region_exclusive: number;
         };
         /** BackgroundTask */
         BackgroundTask: {
@@ -2495,10 +2632,13 @@ export interface components {
         };
         /** CatalogFacets */
         CatalogFacets: {
+            availability: components["schemas"]["AvailabilityCounts"];
             /** Categories */
             categories: components["schemas"]["CategoryFacet"][];
             /** Datasets */
             datasets: components["schemas"]["DatasetFacet"][];
+            /** Date Added */
+            date_added: components["schemas"]["MonthCount"][];
             /** Subcategories */
             subcategories: components["schemas"]["SubcategoryFacet"][];
             /** Types */
@@ -2543,16 +2683,31 @@ export interface components {
         CatalogStats: {
             /** Alpha Count Max */
             alpha_count_max?: number | null;
+            /** Alpha Count Min */
+            alpha_count_min?: number | null;
             /** Coverage Max */
             coverage_max?: number | null;
             /** Coverage Median */
             coverage_median?: number | null;
             /** Coverage Min */
             coverage_min?: number | null;
+            /**
+             * Date Added
+             * @default []
+             */
+            date_added: components["schemas"]["MonthCount"][];
+            /** Date Coverage Max */
+            date_coverage_max?: number | null;
+            /** Date Coverage Min */
+            date_coverage_min?: number | null;
             /** Pyramid Multiplier Max */
             pyramid_multiplier_max?: number | null;
+            /** Pyramid Multiplier Min */
+            pyramid_multiplier_min?: number | null;
             /** User Count Max */
             user_count_max?: number | null;
+            /** User Count Min */
+            user_count_min?: number | null;
         };
         /** CategoryFacet */
         CategoryFacet: {
@@ -2632,6 +2787,11 @@ export interface components {
             /** Updatedat */
             updatedAt: string | null;
         };
+        /**
+         * CheckResult
+         * @enum {string}
+         */
+        CheckResult: "PASS" | "FAIL" | "PENDING" | "WARNING" | "ERROR";
         /** ClaudeRateWindow */
         ClaudeRateWindow: {
             /** Remainingpercent */
@@ -2729,6 +2889,42 @@ export interface components {
             /** Resetcredits */
             resetCredits: number;
             secondary: components["schemas"]["CodexRateWindow"] | null;
+        };
+        /** Competition */
+        Competition: {
+            /** Enddate */
+            endDate: string | null;
+            /** Enrolled */
+            enrolled: boolean;
+            /** Faq */
+            faq: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Ongoing */
+            ongoing: boolean;
+            /** Scoring */
+            scoring: string | null;
+            /** Signupenddate */
+            signUpEndDate: string | null;
+            standing: components["schemas"]["CompetitionStanding"] | null;
+            /** Startdate */
+            startDate: string | null;
+            /** Status */
+            status: string;
+        };
+        /** CompetitionStanding */
+        CompetitionStanding: {
+            /** Alphas */
+            alphas: number | null;
+            /** Rank */
+            rank: number | null;
+        };
+        /** Competitions */
+        Competitions: {
+            /** Competitions */
+            competitions: components["schemas"]["Competition"][];
         };
         /** CorrelatedPair */
         CorrelatedPair: {
@@ -3025,6 +3221,14 @@ export interface components {
             coverage_min?: number | null;
             /** Dataset Ids */
             dataset_ids?: string[];
+            /** Date Coverage Max */
+            date_coverage_max?: number | null;
+            /** Date Coverage Min */
+            date_coverage_min?: number | null;
+            /** Date Created From */
+            date_created_from?: string | null;
+            /** Date Created To */
+            date_created_to?: string | null;
             /** Field Types */
             field_types?: string[];
             /**
@@ -3037,6 +3241,8 @@ export interface components {
              * @default 0
              */
             offset: number;
+            /** Pyramid Multiplier Max */
+            pyramid_multiplier_max?: number | null;
             /** Pyramid Multiplier Min */
             pyramid_multiplier_min?: number | null;
             /**
@@ -3070,6 +3276,15 @@ export interface components {
             user_count_max?: number | null;
             /** User Count Min */
             user_count_min?: number | null;
+        };
+        /** FieldOutline */
+        FieldOutline: {
+            /** Fields */
+            fields: number;
+            /** Missing */
+            missing: string[];
+            /** Text */
+            text: string;
         };
         /** FieldPage */
         FieldPage: {
@@ -3137,8 +3352,6 @@ export interface components {
             keyId: number;
             /** Models */
             models: number;
-            /** Newmodels */
-            newModels: string[];
             /**
              * Ok
              * @constant
@@ -3147,18 +3360,20 @@ export interface components {
         };
         /** LLMBudget */
         LLMBudget: {
-            /** Bulk */
-            bulk: boolean;
-            /** Label */
-            label: string;
+            /** Allowedtoday */
+            allowedToday: number;
             /** Model */
             model: string;
-            /** Perkeyperday */
-            perKeyPerDay: number;
             /** Provider */
             provider: string;
+            /** Ref */
+            ref: string;
             /** Remainingtoday */
             remainingToday: number;
+            /** Resetinseconds */
+            resetInSeconds: number;
+            /** Resettimezone */
+            resetTimezone: string;
         };
         /** LLMKey */
         LLMKey: {
@@ -3191,10 +3406,8 @@ export interface components {
             enabled: number;
             /** Keys */
             keys: components["schemas"]["LLMKey"][];
-            /** Quotatimezone */
-            quotaTimezone: string;
             /** Resetinseconds */
-            resetInSeconds: number;
+            resetInSeconds: number | null;
         };
         /** LLMKeyUsage */
         LLMKeyUsage: {
@@ -3213,7 +3426,8 @@ export interface components {
         };
         /** LLMModels */
         LLMModels: {
-            defaults: components["schemas"]["ModelDefaults"];
+            /** Defaultprompttokens */
+            defaultPromptTokens: number;
             /** Models */
             models: components["schemas"]["ModelInfo"][];
             /** Note */
@@ -3230,8 +3444,8 @@ export interface components {
             keyHint: string;
             /** Label */
             label: string;
-            /** Models */
-            models: components["schemas"]["ModelInfo"][];
+            /** Limitsurl */
+            limitsUrl: string;
             /** Onboardingurl */
             onboardingUrl: string;
             /** Paid */
@@ -3414,53 +3628,42 @@ export interface components {
             /** Universe */
             universe: string;
         };
-        /** ModelDefaults */
-        ModelDefaults: {
-            /** Chat */
-            chat: string;
-            /** Deep */
-            deep: string;
-        };
         /**
          * ModelInfo
-         * @description One model and its free-tier budget, as the screens show it.
+         * @description One model and the limits its user gave it. Each key gets these limits in full.
          */
         ModelInfo: {
-            /**
-             * Bulk
-             * @default false
-             */
-            bulk: boolean;
-            /**
-             * Discovered
-             * @default false
-             */
-            discovered: boolean;
             /** Id */
             id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "text" | "embedding" | "open";
-            /** Label */
-            label: string;
-            /**
-             * Provider
-             * @default google
-             */
+            /** Maxprompttokens */
+            maxPromptTokens?: number | null;
+            /** Provider */
             provider: string;
-            /**
-             * Recommended
-             * @default false
-             */
-            recommended: boolean;
+            /** Ref */
+            readonly ref: string;
+            /** Resettimezone */
+            resetTimezone: string;
             /** Rpd */
             rpd: number;
             /** Rpm */
             rpm: number;
-            /** Tpm */
-            tpm: number;
+        };
+        /** MonthCount */
+        MonthCount: {
+            /** Fields */
+            fields: number;
+            /**
+             * Month
+             * Format: date
+             */
+            month: string;
+        };
+        /** OfferedModels */
+        OfferedModels: {
+            /** Error */
+            error: string | null;
+            /** Models */
+            models: string[];
         };
         /** OperatorsRead */
         OperatorsRead: {
@@ -3477,6 +3680,16 @@ export interface components {
             maxSimulations: number;
             /** Vector */
             vector: string[];
+        };
+        /**
+         * OutlineRequest
+         * @description Fields picked one by one, or whole datasets: a category or subcategory is its datasets.
+         */
+        OutlineRequest: {
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /** Field Ids */
+            field_ids?: string[];
         };
         /** Pair */
         Pair: {
@@ -3720,14 +3933,12 @@ export interface components {
             effort?: string | null;
             /** Id */
             id: string;
-            /** Label */
-            label: string;
             /** Provider */
             provider: string;
+            /** Ref */
+            ref: string;
             /** Remainingtoday */
             remainingToday: number | null;
-            /** Tpm */
-            tpm: number;
         };
         /** PowerPoolOptions */
         PowerPoolOptions: {
@@ -3778,6 +3989,7 @@ export interface components {
             dataset_ids?: string[];
             /** Delay */
             delay: number;
+            field_filter?: components["schemas"]["FieldFilter"] | null;
             /** Model */
             model?: string | null;
             /** Neutralizations */
@@ -3834,6 +4046,42 @@ export interface components {
             poolWithoutPnl: string[];
             /** Region */
             region: string;
+        };
+        /** Preferences */
+        Preferences: {
+            /**
+             * Autoupdate
+             * @default true
+             */
+            autoUpdate: boolean;
+            /**
+             * Defaultcores
+             * @default 4
+             */
+            defaultCores: number;
+            /**
+             * Keepawake
+             * @default true
+             */
+            keepAwake: boolean;
+            /**
+             * Lendidlecores
+             * @default false
+             */
+            lendIdleCores: boolean;
+            /** Pnlcheckresults */
+            pnlCheckResults?: components["schemas"]["CheckResult"][];
+            /**
+             * Pnldownload
+             * @default true
+             */
+            pnlDownload: boolean;
+            /**
+             * Updatecheckhours
+             * @default 1
+             * @enum {integer}
+             */
+            updateCheckHours: 0 | 1 | 6 | 24;
         };
         /** Preview */
         Preview: {
@@ -4041,6 +4289,8 @@ export interface components {
         };
         /** RegionPlan */
         RegionPlan: {
+            /** Cost */
+            cost: number;
             /** Delays */
             delays: number[];
             /** Markets */
@@ -4079,7 +4329,8 @@ export interface components {
         };
         /**
          * SampleRequest
-         * @description What to queue. An empty list means "everything the plan offers".
+         * @description What to queue. An empty market or pair list means "everything the plan offers"; an
+         *     empty neutralization list is refused, since nobody chose what to run.
          */
         SampleRequest: {
             /**
@@ -4156,6 +4407,7 @@ export interface components {
             decay: number;
             /** Delay */
             delay: number;
+            field_filter?: components["schemas"]["FieldFilter"] | null;
             /** Neutralizations */
             neutralizations?: string[];
             /** Region */
@@ -4224,6 +4476,30 @@ export interface components {
             userId: string | null;
             /** Verificationurl */
             verificationUrl: string | null;
+        };
+        /** SetModel */
+        SetModel: {
+            /**
+             * Max Prompt Tokens
+             * @description Most tokens one Power Pool prompt may use; null for default
+             */
+            max_prompt_tokens?: number | null;
+            /**
+             * Model
+             * @description The provider's model id
+             */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Requests Per Day */
+            requests_per_day: number;
+            /** Requests Per Minute */
+            requests_per_minute: number;
+            /**
+             * Reset Timezone
+             * @description IANA time zone whose midnight starts a new day
+             */
+            reset_timezone: string;
         };
         /** SettingsField */
         SettingsField: {
@@ -4425,6 +4701,19 @@ export interface components {
             /** Turnover */
             turnover: number | null;
         };
+        /** SubmittableMarket */
+        SubmittableMarket: {
+            /** Count */
+            count: number;
+            /** Delay */
+            delay: number;
+            /** Instrumenttype */
+            instrumentType: string;
+            /** Region */
+            region: string;
+            /** Universe */
+            universe: string;
+        };
         /** SubmittableResponse */
         SubmittableResponse: {
             /** Alphas */
@@ -4433,6 +4722,8 @@ export interface components {
             correlatedPruned: number;
             /** Heldoutfailed */
             heldOutFailed: number;
+            /** Markets */
+            markets: components["schemas"]["SubmittableMarket"][];
             /** Nearmisses */
             nearMisses: number;
             /** Pending */
@@ -4756,6 +5047,7 @@ export interface components {
             decay: number;
             /** Delay */
             delay: number;
+            field_filter?: components["schemas"]["FieldFilter"] | null;
             /** Neutralizations */
             neutralizations?: string[];
             /** Region */
@@ -4778,6 +5070,18 @@ export interface components {
             universe?: string | null;
             /** Vector Operators */
             vector_operators?: string[];
+        };
+        /** TemplateText */
+        TemplateText: {
+            /** Text */
+            text: string;
+        };
+        /** TemplateTree */
+        TemplateTree: {
+            /** Tree */
+            tree: {
+                [key: string]: unknown;
+            };
         };
         /** ThreadScope */
         ThreadScope: {
@@ -4861,6 +5165,8 @@ export interface components {
             available: boolean;
             /** Caninstall */
             canInstall: boolean;
+            /** Checkedat */
+            checkedAt: string | null;
             /** Current */
             current: string;
             /** Isrelease */
@@ -4869,6 +5175,8 @@ export interface components {
             latest: string | null;
             /** Launcher */
             launcher: string | null;
+            /** Launcherfile */
+            launcherFile: string;
             /** Launcheroutdated */
             launcherOutdated: boolean;
             /** Notes */
@@ -5505,6 +5813,46 @@ export interface operations {
             };
         };
     };
+    field_outline_api_catalog_fields_outline_post: {
+        parameters: {
+            query: {
+                /** @description e.g. USA, EUR, GLB */
+                region: string;
+                delay: number;
+                /** @description e.g. TOP3000 */
+                universe: string;
+                instrumentType?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutlineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FieldOutline"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     field_detail_api_catalog_fields__field_id__get: {
         parameters: {
             query: {
@@ -5901,6 +6249,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    competitions_api_competitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competitions"];
                 };
             };
         };
@@ -6672,6 +7040,69 @@ export interface operations {
             };
         };
     };
+    set_model_api_llm_models_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetModel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_model_api_llm_models_delete: {
+        parameters: {
+            query: {
+                provider: string;
+                model: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_prompts_api_llm_prompts_get: {
         parameters: {
             query?: never;
@@ -6708,6 +7139,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LLMProviders"];
+                };
+            };
+        };
+    };
+    offered_models_api_llm_providers__provider__models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfferedModels"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6858,6 +7320,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddedTask"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_api_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preferences"];
+                };
+            };
+        };
+    };
+    write_api_preferences_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Preferences"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preferences"];
                 };
             };
             /** @description Validation Error */
@@ -7137,6 +7652,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemplateLabOptions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    parse_template_api_template_lab_parse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateText"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateTree"];
                 };
             };
             /** @description Validation Error */
@@ -7707,6 +8255,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlphaDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alpha_pnl_api_vault_alphas__alpha_id__pnl_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alpha_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlphaPnl"];
                 };
             };
             /** @description Validation Error */

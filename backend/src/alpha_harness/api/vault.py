@@ -1,7 +1,5 @@
 """The alpha vault: every alpha you have run, its checks, and its daily returns."""
 
-from __future__ import annotations
-
 import itertools
 from datetime import timedelta
 from typing import Annotated, Any, Literal
@@ -84,11 +82,20 @@ class SubmittableAlpha(Out):
     brain_url: str
 
 
+class SubmittableMarket(Out):
+    instrument_type: str
+    region: str
+    delay: int
+    universe: str
+    count: int
+
+
 class SubmittableResponse(Out):
     #: At most five distinct Alphas that held up in the test years, most stable first.
     shortlist: list[SubmittableAlpha]
     alphas: list[SubmittableAlpha]
     total: int
+    markets: list[SubmittableMarket]
     #: Still being judged by the platform.
     pending: int
     #: Failing one or two fixable checks.
@@ -131,6 +138,8 @@ class AlphaRow(Out):
     pyramids: list[str] = Field(default_factory=list)
     train_sharpe: float | None = None
     test_sharpe: float | None = None
+    #: Picking seeds only: the region a region-agnostic Alpha's figures come from.
+    standing_region: str | None = None
 
 
 class AlphaPage(Out):
@@ -148,13 +157,17 @@ class AlphaDetail(Out):
     expression: str | None
     settings: AlphaSettings
     checks: list[dict[str, Any]]
+    brain_url: str
+
+
+class AlphaPnl(Out):
     #: Cumulative PnL, one value per stored trading day.
     pnl: list[float]
     #: ``YYYY-MM-DD`` for each value in ``pnl``.
     dates: list[str]
     days: int
+    #: Why ``pnl`` is empty, when the download failed.
     problem: str | None
-    brain_url: str
 
 
 @router.get("")
@@ -246,12 +259,30 @@ async def sync_alphas(state: State) -> SyncStarted:
 
 @router.get("/alphas/{alpha_id}/detail")
 async def alpha_detail(alpha_id: str, state: State) -> AlphaDetail:
-    """One alpha with its checks and PnL curve. Downloads the daily PnL the first time."""
+    """One stored alpha: its expression, settings and checks. Local only, so it answers at once;
+    the PnL comes from :func:`alpha_pnl`, which may have to download it."""
     row = (await state.alphas.by_ids([alpha_id])).get(alpha_id)
     if row is None:
         raise refuse(
             404, "unknown_alpha", f"{alpha_id} is not stored here yet. Sync from BRAIN first."
         )
+    return AlphaDetail.model_validate(
+        {
+            "alphaId": alpha_id,
+            "expression": row.get("expression"),
+            "settings": {
+                k: row.get(k)
+                for k in ("region", "universe", "delay", "neutralization", "decay", "truncation")
+            },
+            "checks": checks_of(row.get("checks")),
+            "brainUrl": f"{PLATFORM_ALPHA_URL}{alpha_id}",
+        }
+    )
+
+
+@router.get("/alphas/{alpha_id}/pnl")
+async def alpha_pnl(alpha_id: str, state: State) -> AlphaPnl:
+    """One alpha's cumulative PnL. Downloads the daily PnL from BRAIN the first time."""
     problem = None
     if await state.alphas.series_length(alpha_id) == 0:
         try:
@@ -262,20 +293,6 @@ async def alpha_detail(alpha_id: str, state: State) -> AlphaDetail:
     rows = await state.alphas.pnl_series(alpha_id)
     # Stored rows are daily PnL; the chart wants the running total, every day with its date.
     values = [round(total, 2) for total in itertools.accumulate(float(r["pnl"]) for r in rows)]
-    dates = [str(r["date"]) for r in rows]
-    return AlphaDetail.model_validate(
-        {
-            "alphaId": alpha_id,
-            "expression": row.get("expression"),
-            "settings": {
-                k: row.get(k)
-                for k in ("region", "universe", "delay", "neutralization", "decay", "truncation")
-            },
-            "checks": checks_of(row.get("checks")),
-            "pnl": values,
-            "dates": dates,
-            "days": len(values),
-            "problem": problem,
-            "brainUrl": f"{PLATFORM_ALPHA_URL}{alpha_id}",
-        }
+    return AlphaPnl(
+        pnl=values, dates=[str(r["date"]) for r in rows], days=len(values), problem=problem
     )
