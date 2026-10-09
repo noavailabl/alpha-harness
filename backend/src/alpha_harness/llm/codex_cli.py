@@ -70,7 +70,7 @@ def _executable() -> str | None:
         return executable
     if sys.platform != "win32":
         return None
-    local_app_data = os.environ.get("LOCALAPPDATA")
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
     if not local_app_data:
         return None
     bundled = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
