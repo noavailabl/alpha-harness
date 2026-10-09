@@ -26,6 +26,7 @@ from .params import (
     POWER_POOL_SAMPLER,
     SEARCH_SAMPLER,
     SETTINGS_SAMPLER,
+    SUPER_LAB,
     TASK_SAMPLERS,
     TEMPLATE_SAMPLER,
 )
@@ -52,6 +53,7 @@ _TASKS: dict[str, tuple[str, str]] = {
     POWER_POOL_SAMPLER: ("power-pool", "sharpe"),
     SETTINGS_SAMPLER: ("settings-sampler", "sharpe"),
     CORRELATION_BREAKER: ("correlation-breaker", "sharpe"),
+    SUPER_LAB: ("super-alpha", "sharpe"),
 }
 
 
@@ -311,13 +313,16 @@ async def add_study(
     template_name: str | None = None,
     run: bool = False,
     seeds: Callable[[int], list[Trial]] | None = None,
+    objective: str | None = None,
 ) -> AddedTask:
     """Store a task: not started, or queued for the scheduler when ``run``.
 
     ``seeds`` are trials the task starts with, written in the same transaction.
+    ``objective`` replaces the lab's own, e.g. Sharpe where no test period splits off a train.
     """
     lab = TASK_SAMPLERS[sampler]
-    prefix, objective = _TASKS[sampler]
+    prefix, own = _TASKS[sampler]
+    objective = objective or own
     task = f"{prefix}-{now:%y%m%d%H%M%S%f}"
     row = Study(
         name=f"{lab} · {task}",

@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn'
 import { fmt } from '@/lib/format'
 import { isRegionAgnostic, REGION_AGNOSTIC, regionLabel, runsRegionAgnostic } from '@/lib/scope'
 import { Button } from '@/ui/kit'
-import { useFieldFilter } from './state'
+import { type FieldFilterState, useFieldFilter } from './state'
 
 type Counts = CatalogFacets['availability']
 
@@ -49,12 +49,19 @@ function Toggle({
 export function AvailabilityFilters({
   scope,
   counts,
+  value,
+  onChange,
 }: {
   scope: Scope
   counts: Counts | undefined
+  /** A filter of the caller's own, e.g. one Template Lab variable's; the Data Explorer's by default. */
+  value?: FieldFilterState | undefined
+  onChange?: ((change: Partial<FieldFilterState>) => void) | undefined
 }) {
-  const filter = useFieldFilter((s) => s.filter)
-  const set = useFieldFilter((s) => s.set)
+  const explorer = useFieldFilter((s) => s.filter)
+  const setExplorer = useFieldFilter((s) => s.set)
+  const filter = value ?? explorer
+  const set = onChange ?? setExplorer
   const scopes = useQuery({ queryKey: ['catalog', 'scopes'], queryFn: catalog.scopes })
 
   const offersAgnostic = runsRegionAgnostic(scope)

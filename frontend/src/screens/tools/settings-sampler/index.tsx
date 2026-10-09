@@ -8,13 +8,13 @@
  * market — EUR delay 1, say — be dropped on its own.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { today } from '@/api/core'
 import { cn } from '@/lib/cn'
 import { DASH, fmt } from '@/lib/format'
-import { neutralizationLabel } from '@/lib/neutralization'
+import { neutralizationLabel, splitNeutralizations } from '@/lib/neutralization'
 import { useCores } from '@/lib/preferences'
 import {
   DEFAULT_SCOPE,
@@ -23,12 +23,15 @@ import {
   regionLabel,
   useScopeOptions,
 } from '@/lib/scope'
-import { AstInspector } from '@/screens/pool/shared'
+import { useDebounced } from '@/lib/use-debounced'
 import { AddTaskButtons, useAddTask } from '@/screens/research-labs/add-task'
-import { NeutralizationPicker } from '@/screens/research-labs/neutralization'
+import { SimulationSettingsFields, testPeriodOf } from '@/screens/research-labs/simulation-settings'
+import { templateLab } from '@/screens/research-labs/template/api'
+import { TemplateEditor } from '@/screens/research-labs/template/editor'
+import { Facts } from '@/screens/research-labs/template/gallery'
+import { useMarketScope } from '@/screens/research-labs/template/index'
 import {
   Button,
-  Chips,
   Empty,
   ErrorNotice,
   Field,
@@ -41,9 +44,8 @@ import {
   Panel,
   Segmented,
   Skeleton,
-  Textarea,
+  Switch,
 } from '@/ui/kit'
-import { Select } from '@/ui/overlay'
 import {
   type Holding,
   type MarketPick,
@@ -58,6 +60,12 @@ import {
  *  a batch of region-agnostic ones, so those go one at a time. */
 const BATCH = 10
 const batchOf = (region: string) => (region === REGION_AGNOSTIC ? 1 : BATCH)
+
+/** A plain expression has no template variables; held once so the editor never relints for them. */
+const NO_PRESETS: Record<string, string> = {}
+const NO_VARIABLES = {}
+const NO_INFOS = new Map()
+const NO_PROBLEMS: string[] = []
 
 const REGION_AGNOSTIC_NOTE =
   'Region Agnostic: each Simulation runs in every Region its Fields reach and uses 4 of the ' +
@@ -74,10 +82,48 @@ const MODES: { value: Mode; label: string }[] = [
 /** TOP200 before TOP1000: universe names are numbered, so compare them that way. */
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })
 
+/**
+ * Each family's neutralizations, three to a row. Risk: the fundamental factor models with
+ * their combination last, then the other risk models. Other: no grouping and the geographic
+ * groups, then the GICS hierarchy from sector down.
+ */
+const NEUTRALIZATION_ORDER = [
+  'FAST',
+  'SLOW',
+  'SLOW_AND_FAST',
+  'REVERSION_AND_MOMENTUM',
+  'CROWDING',
+  'STATISTICAL',
+  'NONE',
+  'MARKET',
+  'COUNTRY',
+  'SECTOR',
+  'INDUSTRY',
+  'SUBINDUSTRY',
+]
+
+/** Universes without a stock count in their name: the volume floors, then ALL's size buckets. */
+const UNCOUNTED_UNIVERSES = ['MINVOL1M', 'MINVOL10M', 'LARGE', 'MEDIUM', 'SMALL']
+
+/**
+ * Smallest universe first. A named index sits just after the TOP universe of its size
+ * (TOPSP500 after TOP500, TOP2000U after TOP2000), and the uncounted ones close the list.
+ */
+const bySize = (a: string, b: string) => {
+  const key = (name: string): [number, number] => {
+    const count = /^TOP\D*(\d+)/.exec(name)?.[1]
+    if (count) return [Number(count), name.length]
+    const at = UNCOUNTED_UNIVERSES.indexOf(name)
+    return [Number.POSITIVE_INFINITY, at === -1 ? UNCOUNTED_UNIVERSES.length : at]
+  }
+  const [x, y] = [key(a), key(b)]
+  return x[0] - y[0] || x[1] - y[1] || byName(a, b)
+}
+
 const allMarkets = (plan: SettingsPlan) => plan.regions.flatMap((r) => r.markets)
 
 /** Every market but All Regions, which costs four a simulation and so is only swept on
- *  purpose, and every pair; no neutralization, which the reader ticks before anything runs. */
+ *  purpose, every neutralization and every pair. */
 function defaults(plan: SettingsPlan) {
   return {
     chosen: new Set(
@@ -85,7 +131,7 @@ function defaults(plan: SettingsPlan) {
         .filter((m) => m.region !== REGION_AGNOSTIC)
         .map(marketKey),
     ),
-    neutralizations: [] as string[],
+    neutralizations: [...new Set(plan.regions.flatMap((r) => r.neutralizations))],
     pairs: [...new Set(plan.regions.flatMap((r) => r.pairs.map(pairKey)))],
   }
 }
@@ -107,12 +153,10 @@ const groupOf = (
 /** One region once the choice is applied: what survives, and what it costs. */
 interface Branch {
   region: string
-  positionAvailable: boolean
-  /** Simulations of the day's allowance one run here uses. */
-  cost: number
   group: Group
   neutralizations: number
-  pairs: number
+  /** The constraints swept here, `MP / MT`, or `None` when it runs unconstrained only. */
+  investability: string
   rows: {
     delay: number
     group: Group
@@ -120,7 +164,6 @@ interface Branch {
   }[]
   markets: number
   total: number
-  coverage: [number, number] | null
 }
 
 function resolve(
@@ -157,12 +200,10 @@ function resolve(
       byDelay.set(market.delay, [...(byDelay.get(market.delay) ?? []), market])
     }
 
-    const covers: number[] = []
     let markets = 0
     for (const market of live) {
       if (!chosen.has(marketKey(market))) continue
       markets += 1
-      covers.push(market.coverage)
       picks.push({ region: market.region, delay: market.delay, universe: market.universe })
       const key = `${market.region}|${market.delay}`
       perDelay.set(key, (perDelay.get(key) ?? 0) + runs)
@@ -170,11 +211,15 @@ function resolve(
 
     branches.push({
       region: region.region,
-      positionAvailable: region.positionAvailable,
-      cost: region.cost,
       group: groupOf(live, chosen),
       neutralizations: neutHere,
-      pairs: pairsHere,
+      investability:
+        [
+          legalPairs.some((p) => p.maxPosition === 'ON') && 'MP',
+          legalPairs.some((p) => p.maxTrade === 'ON') && 'MT',
+        ]
+          .filter(Boolean)
+          .join(' / ') || 'None',
       rows: [...byDelay.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([delay, list]) => ({
@@ -182,11 +227,10 @@ function resolve(
           group: groupOf(list, chosen),
           universes: list
             .map((m) => ({ name: m.universe, key: marketKey(m), on: chosen.has(marketKey(m)) }))
-            .sort((a, b) => byName(a.name, b.name)),
+            .sort((a, b) => bySize(a.name, b.name)),
         })),
       markets,
       total: markets * runs * region.cost,
-      coverage: covers.length ? [Math.min(...covers), Math.max(...covers)] : null,
     })
   }
 
@@ -202,18 +246,10 @@ function resolve(
   }
 }
 
-/** One figure when the region agrees with itself, a range when it does not. */
-function coverageLabel(span: [number, number] | null): string {
-  if (!span) return DASH
-  const [low, high] = span
-  const lo = fmt.pct(low, 0)
-  return lo === fmt.pct(high, 0) ? lo : `${lo}\u2013${fmt.pct(high, 0)}`
-}
-
-/** Region, its three factors, then what they multiply to. The units are named once in the
- *  header above the list, so no row has to carry them. */
+/** Region, then its three factors and what they come to, kept together at the far right.
+ *  The units are named once in the header above the list. */
 const GRID =
-  'grid min-w-184 grid-cols-[7.5rem_4rem_6.5rem_3rem_5.5rem_4.5rem_1fr] items-center gap-x-3'
+  'grid min-w-184 grid-cols-[10rem_minmax(0,1fr)_5rem_8rem_7rem_7rem] items-center gap-x-3'
 
 /** Keeps the Region column in view when the list scrolls sideways. A surface, not a shadow:
  *  shadows belong to what floats over the page. */
@@ -230,6 +266,7 @@ function GroupChip({
   size = 'md',
   disabled,
   title,
+  className,
 }: {
   label: ReactNode
   group: Group
@@ -237,6 +274,7 @@ function GroupChip({
   size?: 'md' | 'sm'
   disabled?: boolean
   title?: string | undefined
+  className?: string
 }) {
   const { keys, on } = group
   const part = on > 0 && on < keys.length
@@ -250,10 +288,11 @@ function GroupChip({
       className={cn(
         'num flex items-center gap-1.5 rounded-sm border whitespace-nowrap transition-colors',
         size === 'md' ? 'h-8 px-2.5 text-body' : 'h-7 px-2 text-body-compact',
-        on === 0 && 'border-(--field-border) bg-surface-1 text-ink-subtle line-through',
-        part && 'border-hairline-strong bg-surface-2 text-ink-muted',
-        on === keys.length && on > 0 && 'border-hairline-strong bg-surface-3 text-ink',
+        on === 0 && 'border-(--field-border) bg-surface-1 text-ink-subtle',
+        part && 'border-primary/50 bg-surface-2 text-ink-muted',
+        on === keys.length && on > 0 && 'border-primary bg-primary-subtle text-ink',
         !disabled && 'hover:border-(--field-border-hover) hover:text-ink',
+        className,
       )}
     >
       {label}
@@ -263,6 +302,94 @@ function GroupChip({
         </span>
       )}
     </button>
+  )
+}
+
+/** One setting in a box of its own: its name and shortcuts on top, its choices below. */
+/**
+ * A heading that picks its whole section: clears it when anything in it is on, fills it when
+ * it is empty.
+ */
+function ToggleTitle({
+  label,
+  any,
+  onToggle,
+  className,
+}: {
+  label: string
+  any: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={any}
+      title={any ? `Clear all ${label}` : `Choose all ${label}`}
+      onClick={onToggle}
+      className={cn(
+        'cursor-pointer whitespace-nowrap underline-offset-4 transition-colors hover:text-ink hover:underline',
+        className,
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
+function Tile({
+  label,
+  actions,
+  children,
+  className,
+  any,
+  onToggle,
+}: {
+  label: string
+  actions?: ReactNode
+  children: ReactNode
+  className?: string
+  /** With `onToggle`, the heading picks the whole section. */
+  any?: boolean
+  onToggle?: () => void
+}) {
+  return (
+    <section
+      className={cn(
+        'flex min-w-0 flex-col gap-2.5 rounded-md border border-hairline-strong bg-surface-2 p-3',
+        className,
+      )}
+    >
+      <header className="flex min-h-6 items-center justify-between gap-3">
+        <h4 className="text-body-compact font-medium whitespace-nowrap text-ink-muted">
+          {onToggle ? <ToggleTitle label={label} any={any ?? false} onToggle={onToggle} /> : label}
+        </h4>
+        {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+/** Choices sharing the full width evenly, `columns` to a line; scrolls rather than squeezes. */
+function Spread({
+  columns,
+  min = '4rem',
+  children,
+}: {
+  columns: number
+  min?: string
+  children: ReactNode
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <div
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(${min}, 1fr))` }}
+      >
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -280,12 +407,11 @@ function Tree({
         className={cn(GRID, 'px-3 pb-1.5 text-caption tracking-wide text-ink-subtle uppercase')}
       >
         <span className={STICKY}>Region</span>
+        <span />
         <span className="text-right">Markets</span>
         <span className="text-right">Neutralizations</span>
-        <span className="text-right">Pairs</span>
+        <span className="text-right">Investability</span>
         <span className="text-right">Simulations</span>
-        <span className="text-right">Coverage</span>
-        <span />
       </div>
       <ul className="flex flex-col gap-1.5">
         {branches.map((branch) => (
@@ -305,6 +431,7 @@ function Tree({
                   title={branch.region === REGION_AGNOSTIC ? REGION_AGNOSTIC_NOTE : undefined}
                 />
               </div>
+              <span />
               <span className="num text-right text-body-compact text-ink-muted">
                 {branch.markets}
               </span>
@@ -312,21 +439,10 @@ function Tree({
                 {branch.neutralizations}
               </span>
               <span className="num text-right text-body-compact text-ink-muted">
-                {branch.pairs}
+                {branch.investability}
               </span>
               <span className="num text-right text-body font-semibold text-ink">
                 {fmt.int(branch.total)}
-              </span>
-              <span className="num text-right text-body-compact text-ink-subtle">
-                {coverageLabel(branch.coverage)}
-              </span>
-              <span className="text-body-compact text-ink-subtle">
-                {[
-                  branch.cost > 1 && `${branch.cost} simulations each`,
-                  !branch.positionAvailable && 'no Max Position',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
               </span>
             </div>
 
@@ -359,103 +475,6 @@ function Tree({
   )
 }
 
-/** A typed number held inside BRAIN's own bounds. */
-const clamp = (text: string, max: number) =>
-  Math.min(max, Math.max(0, Math.round(Number(text) || 0)))
-
-/**
- * How every simulation in the sweep is held: BRAIN's own four, laid out as BRAIN lays them
- * out — Test Period is years *and* months, not a number of whole years.
- */
-function SettingsFields({
-  decay,
-  setDecay,
-  truncation,
-  setTruncation,
-  nanHandling,
-  setNanHandling,
-  testYears,
-  setTestYears,
-  testMonths,
-  setTestMonths,
-}: {
-  decay: string
-  setDecay: (v: string) => void
-  truncation: string
-  setTruncation: (v: string) => void
-  nanHandling: 'ON' | 'OFF'
-  setNanHandling: (v: 'ON' | 'OFF') => void
-  testYears: string
-  setTestYears: (v: string) => void
-  testMonths: string
-  setTestMonths: (v: string) => void
-}) {
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Field label="Decay">
-        <Input
-          type="number"
-          min={0}
-          max={512}
-          step={1}
-          value={decay}
-          onChange={(e) => setDecay(e.target.value)}
-        />
-      </Field>
-      <Field label="Truncation">
-        <Input
-          type="number"
-          min={0}
-          max={1}
-          step={0.01}
-          value={truncation}
-          onChange={(e) => setTruncation(e.target.value)}
-        />
-      </Field>
-      <Field label="NaN Handling">
-        <Select
-          label="NaN Handling"
-          value={nanHandling}
-          onChange={(v) => setNanHandling(v as 'ON' | 'OFF')}
-          items={[
-            { value: 'ON', label: 'On' },
-            { value: 'OFF', label: 'Off' },
-          ]}
-        />
-      </Field>
-      {/* BRAIN takes P0Y0M0D up to P6Y0M0D, and its own form splits the two. The units sit
-          beside the boxes rather than above them, so this reads as one control on one line
-          and its inputs share a baseline with Decay and Truncation. */}
-      <Fieldset legend="Test Period">
-        <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            min={0}
-            max={6}
-            step={1}
-            aria-label="Test period, years"
-            className="w-16"
-            value={testYears}
-            onChange={(e) => setTestYears(e.target.value)}
-          />
-          <span className="text-body-compact text-ink-subtle">Years</span>
-          <Input
-            type="number"
-            min={0}
-            max={11}
-            step={1}
-            aria-label="Test period, months"
-            className="w-16"
-            value={testMonths}
-            onChange={(e) => setTestMonths(e.target.value)}
-          />
-          <span className="text-body-compact text-ink-subtle">Months</span>
-        </div>
-      </Fieldset>
-    </div>
-  )
-}
-
 export function SettingsSamplerScreen() {
   const search = useSearch({ from: '/tools/settings-sampler' })
   const navigate = useNavigate()
@@ -465,14 +484,33 @@ export function SettingsSamplerScreen() {
   const [mode, setMode] = useState<Mode>(alphaId ? 'alpha' : 'expression')
   const [draft, setDraft] = useState(alphaId)
   const [expression, setExpression] = useState('')
+  const operators = useQuery({
+    queryKey: ['template-lab', 'options'],
+    queryFn: () => templateLab.options(),
+    staleTime: 5 * 60_000,
+  })
+  const reference = useMemo(() => operators.data?.reference ?? [], [operators.data])
+  // USA D1 holds the most fields, so its catalog answers field completions and hovers.
+  const scope = useMarketScope('USA', 1) ?? null
+  // Counted as it is typed, so Power Pool's limits and the dataset count are never a guess.
+  const sizing = useDebounced(expression.trim(), 300)
+  const sized = useQuery({
+    queryKey: ['template-lab', 'stats', 'USA', 1, sizing],
+    queryFn: () =>
+      templateLab.stats({
+        region: 'USA',
+        delay: 1,
+        templates: [{ text: sizing, variables: {} }],
+      }),
+    enabled: sizing !== '',
+    placeholderData: keepPreviousData,
+  })
   const [decay, setDecay] = useState('0')
   const [truncation, setTruncation] = useState('0.08')
+  const [pasteurization, setPasteurization] = useState<'ON' | 'OFF'>('ON')
   const [nanHandling, setNanHandling] = useState<'ON' | 'OFF'>('ON')
   const [testYears, setTestYears] = useState('2')
   const [testMonths, setTestMonths] = useState('0')
-  /** Which Alpha's settings have been read into the fields above, so a refetch of the same
-   *  plan does not overwrite an edit made since. */
-  const [inherited, setInherited] = useState('')
   /** The expression last analysed; the draft above only counts once Analyse is pressed. */
   const [typed, setTyped] = useState<Source | null>(null)
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
@@ -482,6 +520,7 @@ export function SettingsSamplerScreen() {
   const [chosenCores, setCores] = useState<number | null>(null)
   const wantedCores = useCores(chosenCores)
   const [marketNeutralOnly, setMarketNeutralOnly] = useState(true)
+  const [truncationAgent, setTruncationAgent] = useState(false)
 
   useEffect(() => {
     setDraft(search.alpha ?? '')
@@ -491,8 +530,9 @@ export function SettingsSamplerScreen() {
   const holding: Holding = {
     decay: Math.max(0, Math.round(Number(decay) || 0)),
     truncation: Number(truncation) || 0.08,
+    pasteurization,
     nanHandling,
-    testPeriod: `P${clamp(testYears, 6)}Y${clamp(testMonths, 11)}M0D`,
+    testPeriod: testPeriodOf(testYears, testMonths),
   }
   const source: Source | null = mode === 'alpha' ? (alphaId ? { alphaId } : null) : typed
   const query = useQuery({
@@ -504,20 +544,23 @@ export function SettingsSamplerScreen() {
   const plan = query.data
   const cores = Math.min(wantedCores, plan?.maxCores ?? wantedCores)
 
-  // An Alpha's own settings fill the fields the first time its plan arrives, so what is shown
-  // is what would run — and stays editable, because an edit is the whole point of having them
-  // here. Keyed on the Alpha, so a refetch never overwrites a change made since.
+  // An Alpha is only a way in: its expression and settings are copied into the Expression tab,
+  // which the sweep then runs like any other.
   useEffect(() => {
-    const own = plan?.settings
-    if (!own || !plan.alphaId || plan.alphaId === inherited) return
-    setInherited(plan.alphaId)
+    if (!plan?.alphaId || !plan.expression) return
+    const own = plan.settings
+    setExpression(plan.expression)
     setDecay(String(own.decay ?? 0))
     setTruncation(String(own.truncation ?? 0.08))
+    setPasteurization(own.pasteurization === 'OFF' ? 'OFF' : 'ON')
     setNanHandling(own.nanHandling === 'OFF' ? 'OFF' : 'ON')
     const period = /^P(\d+)Y(\d+)M/.exec(own.testPeriod ?? '')
     setTestYears(period?.[1] ?? '2')
     setTestMonths(period?.[2] ?? '0')
-  }, [plan?.settings, plan?.alphaId, inherited])
+    setTyped({ expression: plan.expression })
+    setMode('expression')
+    void navigate({ to: '/tools/settings-sampler', search: { alpha: undefined }, replace: true })
+  }, [plan, navigate])
 
   const reset = (from: SettingsPlan) => {
     const start = defaults(from)
@@ -559,6 +602,24 @@ export function SettingsSamplerScreen() {
         : 0,
     [plan, all, marketNeutralOnly],
   )
+  // What the agent sets across the markets chosen, from the plan's own figure for each.
+  const agentValues = all.filter((m) => chosen.has(marketKey(m))).map((m) => m.agentTruncation)
+  const lowest = Math.min(...agentValues)
+  const highest = Math.max(...agentValues)
+  const agentSummary =
+    agentValues.length === 0 ? (
+      'Choose a market to see what it sets.'
+    ) : (
+      <span title="0.08 in broad universes, 0.06 in mid-sized ones, 0.05 in narrow ones, multi-country regions and Delay 0. Never above 0.08, under the 8% Weight Test.">
+        Set per Market:{' '}
+        <span className="num text-ink">
+          {lowest === highest
+            ? fmt.ratio(lowest, 2)
+            : `${fmt.ratio(lowest, 2)} to ${fmt.ratio(highest, 2)}`}
+        </span>{' '}
+        across the chosen markets.
+      </span>
+    )
   const { branches, picks, simulations, batches, markets } = useMemo(
     () => resolve(plan, chosen, neutralizations, pairs, marketNeutralOnly),
     [plan, chosen, neutralizations, pairs, marketNeutralOnly],
@@ -580,15 +641,19 @@ export function SettingsSamplerScreen() {
       return [...buckets.entries()]
     }
     return {
-      regions: by((m) => m.region).map(([value, list]) => ({
-        value,
-        group: groupOf(list, chosen),
-      })),
+      // Most universes first, so the broadest markets lead; ties alphabetical.
+      regions: by((m) => m.region)
+        .map(([value, list]) => ({
+          value,
+          universes: new Set(list.map((m) => m.universe)).size,
+          group: groupOf(list, chosen),
+        }))
+        .sort((a, b) => b.universes - a.universes || a.value.localeCompare(b.value)),
       delays: by((m) => m.delay)
         .sort((a, b) => a[0] - b[0])
         .map(([value, list]) => ({ value, group: groupOf(list, chosen) })),
       universes: by((m) => m.universe)
-        .sort((a, b) => byName(a[0], b[0]))
+        .sort((a, b) => bySize(a[0], b[0]))
         .map(([value, list]) => ({ value, group: groupOf(list, chosen) })),
     }
   }, [all, chosen])
@@ -612,15 +677,22 @@ export function SettingsSamplerScreen() {
   const allNeutralizations = useMemo(() => {
     const names = [...new Set((plan?.regions ?? []).flatMap((r) => r.neutralizations))]
     const labels = new Map(labelled.map((c) => [c.value, c.label]))
-    // BRAIN's order where it has one, so the two families read the same as everywhere else.
+    // Laid out three to a row, each row one family, coarse to fine. One BRAIN adds later
+    // follows in BRAIN's own order.
     const rank = (v: string) => {
-      const at = labelled.findIndex((c) => c.value === v)
-      return at === -1 ? labelled.length : at
+      const at = NEUTRALIZATION_ORDER.indexOf(v)
+      if (at !== -1) return at
+      const brain = labelled.findIndex((c) => c.value === v)
+      return NEUTRALIZATION_ORDER.length + (brain === -1 ? labelled.length : brain)
     }
     return names
       .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
       .map((value) => ({ value, label: neutralizationLabel(value, labels.get(value)) }))
   }, [plan, labelled])
+
+  const anyMarketOn = markets > 0
+  const anyNeutralizationOn = neutralizations.length > 0
+  const toggleMarkets = () => change(all.map(marketKey), !anyMarketOn)
 
   // The header's own query, so both read one cache. What is already queued will spend first.
   const bar = useQuery({ queryKey: ['bar'], queryFn: () => today.bar() })
@@ -637,6 +709,7 @@ export function SettingsSamplerScreen() {
       ...holding,
       markets: picks,
       marketNeutralOnly,
+      truncationAgent,
       neutralizations,
       pairs: allPairs.filter((p) => pairs.includes(pairKey(p))),
       cores,
@@ -685,27 +758,30 @@ export function SettingsSamplerScreen() {
           </form>
         ) : (
           <form onSubmit={analyse} className="flex flex-col gap-3">
-            <Field label="Alpha Expression">
-              <Textarea
+            <Fieldset legend="Alpha Expression">
+              <TemplateEditor
+                label="Alpha Expression"
                 value={expression}
-                onChange={(e) => setExpression(e.target.value)}
-                spellCheck={false}
-                rows={6}
-                className="num"
+                onChange={setExpression}
+                reference={reference}
+                presets={NO_PRESETS}
+                variables={NO_VARIABLES}
+                infos={NO_INFOS}
+                problems={NO_PROBLEMS}
+                scope={scope}
               />
-            </Field>
-            <div className="flex flex-wrap items-end gap-3">
+            </Fieldset>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
               <Button type="submit" variant="primary" disabled={!expression.trim()}>
                 Analyse
               </Button>
+              {expression.trim() && <Facts stats={sized.data?.stats[0]} />}
             </div>
           </form>
         )}
 
         {plan?.expression && (
           <div className="mt-4 flex flex-col gap-4 border-t border-hairline pt-4">
-            <AstInspector expression={plan.expression} />
-
             <section className="flex flex-col gap-2">
               <h3 className="text-body-compact font-medium tracking-wide text-ink-muted uppercase">
                 Data Fields
@@ -745,17 +821,18 @@ export function SettingsSamplerScreen() {
       {plan?.expression && (
         <Panel
           title="Simulation Settings"
-          description={
-            plan.alphaId
-              ? 'Read from the Alpha, and yours to change. Every market in the sweep runs at these.'
-              : 'Every market in the sweep runs at these.'
-          }
+          description={`Every market in the sweep runs at these${truncationAgent ? ', with Truncation set per market' : ''}.`}
         >
-          <SettingsFields
+          <SimulationSettingsFields
             decay={decay}
             setDecay={setDecay}
             truncation={truncation}
             setTruncation={setTruncation}
+            truncationAgent={truncationAgent}
+            setTruncationAgent={setTruncationAgent}
+            agentSummary={agentSummary}
+            pasteurization={pasteurization}
+            setPasteurization={setPasteurization}
             nanHandling={nanHandling}
             setNanHandling={setNanHandling}
             testYears={testYears}
@@ -832,32 +909,21 @@ export function SettingsSamplerScreen() {
             )}
 
             <div className="flex flex-col gap-3">
-              <Fieldset
-                legend={
-                  // Region, Delay and Universe are views of one set of markets, so one pair
-                  // serves all three rows.
-                  <span className="flex items-center justify-between gap-3">
-                    Region
-                    <span className="flex gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => change(all.map(marketKey), true)}
-                      >
-                        All
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => change(all.map(marketKey), false)}
-                      >
-                        Clear
-                      </Button>
+              <Tile
+                label="Region"
+                // Region, Delay and Universe are views of one set of markets, so the heading
+                // picks or clears every one of them.
+                any={anyMarketOn}
+                onToggle={toggleMarkets}
+                actions={
+                  markets === 0 && (
+                    <span className="text-body-compact text-status-warning">
+                      Choose at least one
                     </span>
-                  </span>
+                  )
                 }
               >
-                <div className="flex flex-wrap gap-1.5">
+                <Spread columns={axes.regions.length}>
                   {axes.regions.map((axis) => (
                     <GroupChip
                       key={axis.value}
@@ -865,65 +931,115 @@ export function SettingsSamplerScreen() {
                       group={axis.group}
                       onChange={change}
                       title={axis.value === REGION_AGNOSTIC ? REGION_AGNOSTIC_NOTE : undefined}
+                      className="w-full justify-center"
                     />
                   ))}
-                </div>
-              </Fieldset>
-              <Fieldset legend="Delay">
-                <div className="flex flex-wrap gap-1.5">
+                </Spread>
+              </Tile>
+              <Tile label="Delay" any={anyMarketOn} onToggle={toggleMarkets}>
+                <Spread columns={axes.delays.length} min="6rem">
                   {axes.delays.map((axis) => (
                     <GroupChip
                       key={axis.value}
-                      label={`D${axis.value}`}
+                      label={`Delay ${axis.value}`}
                       group={axis.group}
                       onChange={change}
+                      className="h-10 w-full justify-center"
                     />
                   ))}
-                </div>
-              </Fieldset>
-              <Fieldset legend="Universe">
-                <div className="flex flex-wrap gap-1.5">
+                </Spread>
+              </Tile>
+              <Tile label="Universe" any={anyMarketOn} onToggle={toggleMarkets}>
+                <Spread columns={7} min="6.5rem">
                   {axes.universes.map((axis) => (
                     <GroupChip
                       key={axis.value}
                       label={axis.value}
                       group={axis.group}
                       onChange={change}
+                      className="w-full justify-center"
                     />
                   ))}
-                </div>
-              </Fieldset>
-              <NeutralizationPicker
-                available={allNeutralizations}
-                value={neutralizations}
-                onChange={setNeutralizations}
-                hint={
-                  neutralizations.length === 0 ? 'Choose at least one Neutralization.' : undefined
+                </Spread>
+              </Tile>
+              <Tile
+                label="Neutralization"
+                any={anyNeutralizationOn}
+                onToggle={() =>
+                  setNeutralizations(
+                    anyNeutralizationOn ? [] : allNeutralizations.map((n) => n.value),
+                  )
                 }
-              />
-              {/* A chip, like every other choice in this column, rather than a checkbox
-                  that would be the only one of its kind here. It sits between the two pickers
-                  because it is a rule about their combination, not about either one: NONE
-                  neutralization is fine with an investability constraint, and no constraint is
-                  fine with a neutralization. */}
-              <Chips
-                label="Market-Neutral"
-                value={marketNeutralOnly ? ['on'] : []}
-                onChange={(next) => setMarketNeutralOnly(next.includes('on'))}
-                items={[
-                  {
-                    value: 'on',
-                    label: 'Market-Neutral',
-                    title:
-                      'Skips NONE Neutralization with no Max Trade and no Max Position.' +
-                      (unhedged > 0
-                        ? ` Skipping ${fmt.int(unhedged)} Simulation${unhedged === 1 ? '' : 's'}.`
-                        : ''),
-                  },
-                ]}
-              />
-              <Fieldset legend="Investability">
-                <div className="flex flex-wrap gap-1.5">
+                actions={
+                  neutralizations.length === 0 && (
+                    <span className="text-body-compact text-status-warning">
+                      Choose at least one
+                    </span>
+                  )
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {splitNeutralizations(allNeutralizations).map(({ group, items }, at) => {
+                    const ids = items.map((item) => item.value)
+                    const any = ids.some((id) => neutralizations.includes(id))
+                    return (
+                      <div
+                        key={group.id}
+                        className={cn(
+                          'flex min-w-0 flex-col gap-2',
+                          at > 0 && 'sm:border-l sm:border-hairline sm:pl-4',
+                        )}
+                      >
+                        <div className="flex min-h-6 items-center justify-between gap-3">
+                          <ToggleTitle
+                            label={group.id === 'risk' ? 'Risk' : 'Other'}
+                            any={any}
+                            onToggle={() =>
+                              setNeutralizations((prev) =>
+                                any
+                                  ? prev.filter((v) => !ids.includes(v))
+                                  : [...new Set([...prev, ...ids])],
+                              )
+                            }
+                            className="text-caption tracking-wide text-ink-subtle uppercase"
+                          />
+                        </div>
+                        <Spread columns={3} min="8rem">
+                          {items.map((item) => (
+                            <GroupChip
+                              key={item.value}
+                              label={item.label}
+                              group={{
+                                keys: [item.value],
+                                on: neutralizations.includes(item.value) ? 1 : 0,
+                              }}
+                              onChange={(keys, on) =>
+                                setNeutralizations((prev) =>
+                                  on ? [...prev, ...keys] : prev.filter((k) => !keys.includes(k)),
+                                )
+                              }
+                              className="w-full justify-center"
+                            />
+                          ))}
+                        </Spread>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Tile>
+              <Tile
+                label="Investability"
+                any={pairs.length > 0}
+                onToggle={() => setPairs(pairs.length > 0 ? [] : allPairs.map(pairKey))}
+                actions={
+                  pairs.length === 0 && (
+                    <span className="text-body-compact text-status-warning">
+                      Choose at least one
+                    </span>
+                  )
+                }
+              >
+                <Spread columns={allPairs.length} min="7rem">
                   {allPairs.map((pair) => (
                     <GroupChip
                       key={pairKey(pair)}
@@ -934,10 +1050,33 @@ export function SettingsSamplerScreen() {
                           on ? [...prev, ...keys] : prev.filter((k) => !keys.includes(k)),
                         )
                       }
+                      className="w-full justify-center"
                     />
                   ))}
-                </div>
-              </Fieldset>
+                </Spread>
+              </Tile>
+              {/* A rule about Neutralization and Investability together. */}
+              <Tile
+                label="Market-Neutral"
+                actions={
+                  <span className="flex items-center gap-2.5">
+                    {marketNeutralOnly && unhedged > 0 && (
+                      <span className="text-body-compact leading-none whitespace-nowrap text-ink-muted tabular-nums">
+                        {fmt.int(unhedged)} simulation{unhedged === 1 ? '' : 's'} skipped
+                      </span>
+                    )}
+                    <Switch
+                      checked={marketNeutralOnly}
+                      onChange={setMarketNeutralOnly}
+                      aria-label="Market-Neutral"
+                    />
+                  </span>
+                }
+              >
+                <p className="text-body-compact whitespace-nowrap text-ink-subtle">
+                  Skip None Neutralization without Max Trade or Max Position
+                </p>
+              </Tile>
             </div>
 
             <div className="flex flex-col gap-2 border-t border-hairline pt-4">

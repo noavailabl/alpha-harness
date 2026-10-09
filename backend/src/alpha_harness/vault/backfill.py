@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from ..brain.filters import AlphaQuery, Filter
-from ..brain.schemas import QUICK_MODE, Alpha, RecordSet
+from ..brain.schemas import QUICK_MODE, Alpha, RecordSet, SimulationType
 from .store import checks_json
 from .yields import checks_of, gating_results
 
@@ -152,6 +152,14 @@ class Backfill:
         """
         return await self._launch(kind, label, lambda task: self._job(task, work))
 
+    def cancel_job(self, kind: str) -> bool:
+        """Stop the running job if it is a ``kind``. Whatever it already saved stays."""
+        job = self._running
+        if job is None or job.done() or job.get_name() != kind:
+            return False
+        job.cancel()
+        return True
+
     async def _launch(
         self, kind: str, label: str, run: Callable[[Task], Coroutine[Any, Any, None]]
     ) -> str:
@@ -232,7 +240,8 @@ class Backfill:
                 results = page.get("results") or []
                 alphas = [Alpha.model_validate(raw) for raw in results]
                 await self.vault.save_alphas(alphas)
-                ids.extend(a.id for a in alphas)
+                # A region-agnostic parent has no PnL of its own: its submitted children do.
+                ids.extend(a.id for a in alphas if a.type != SimulationType.RA_PARENT)
                 await self.tasks.update(task, detail=f"Listed {len(ids)} SUBMITTED Alphas")
                 if len(results) < PAGE:
                     break
@@ -240,18 +249,17 @@ class Backfill:
 
             # A simulated series never changes, so one already stored is not fetched again.
             missing = await self.vault.lacking_series(ids)
-            for done, alpha_id in enumerate(missing, start=1):
-                try:
-                    await self.fetch_returns(alpha_id)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("vault.returns_failed", alpha_id=alpha_id, error=str(exc)[:160])
-                await self.tasks.update(
-                    task,
-                    progress=done / len(missing),
-                    detail=f"Downloading PnL and turnover: {done} of {len(missing)}",
-                )
+            failed = await self.fetch_each(
+                task, missing, self.fetch_returns, what="Downloading PnL and turnover"
+            )
+            detail = f"Synced {len(ids)} SUBMITTED Alphas"
+            if failed:
+                detail += f". BRAIN gave no PnL for {len(failed)}: sync again to retry them"
+            await self.tasks.update(task, detail=detail)
             await self.tasks.finish(task)
-            log.info("vault.submitted_synced", alphas=len(ids), fetched=len(missing))
+            log.info(
+                "vault.submitted_synced", alphas=len(ids), fetched=len(missing), failed=len(failed)
+            )
         except asyncio.CancelledError:
             await self.tasks.finish(task, state="cancelled")
             raise

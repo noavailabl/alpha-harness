@@ -40,6 +40,7 @@ from .api import (
     quarter,
     search_lab,
     sims,
+    super_lab,
     tasks,
     template_lab,
     today,
@@ -99,9 +100,15 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        state = AppState()
-        app.state.harness = state
-        await state.startup()
+        try:
+            state = AppState()
+            app.state.harness = state
+            await state.startup()
+        except Exception as exc:
+            # uvicorn reports this and then exits through a traceback of its own, whose last
+            # lines are all the launcher shows; ``__main__`` says this instead.
+            app.state.startup_failure = exc
+            raise
 
         async def install(release: updates.Release) -> None:
             updates.request(release.version, wheel_url=release.wheel_url)
@@ -176,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(search_lab.router)
     app.include_router(lab_tasks.router)
     app.include_router(power_pool_lab.router)
+    app.include_router(super_lab.router)
     app.include_router(chat.router)
     app.include_router(competitions.router)
     app.include_router(update.router)
@@ -236,12 +244,20 @@ class SinglePageApp(StaticFiles):
     @override
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             # A missing file (``.js``) or API path stays a 404; only UI routes fall back.
             if exc.status_code != 404 or "." in path.rsplit("/", 1)[-1] or path.startswith("api"):
                 raise
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
+        # The page is asked for again every time; the scripts it names carry a hash of their
+        # contents, so they never need to be. Without a rule a browser kept the page for a
+        # tenth of its file's age, and after an update showed the old app for hours.
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 app = create_app()

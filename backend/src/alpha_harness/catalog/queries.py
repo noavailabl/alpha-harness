@@ -350,6 +350,23 @@ class CatalogQueries:
             [*scope.params, *field_ids],
         )
 
+    async def sole_datasets(self, field_ids: list[str]) -> dict[str, str]:
+        """Each field's dataset where every market agrees on it. ``revenue`` is fundamental6 in
+        USA and fundamental23 elsewhere, so a field like that is left out."""
+        if not field_ids:
+            return {}
+        rows = await self.catalog.query(
+            f"""
+            SELECT field_id, any_value(dataset_id) AS dataset_id
+            FROM data_field
+            WHERE field_id IN ({", ".join("?" for _ in field_ids)})
+            GROUP BY field_id
+            HAVING count(DISTINCT dataset_id) = 1
+            """,  # noqa: S608
+            field_ids,
+        )
+        return {str(r["field_id"]): str(r["dataset_id"]) for r in rows}
+
     async def field_availability(self, field_id: str) -> list[dict[str, Any]]:
         """Every scope this field appears in.
 
@@ -363,6 +380,25 @@ class CatalogQueries:
             ORDER BY region, delay, universe
             """,
             [field_id],
+        )
+
+    async def universes_holding(
+        self, region: str, delay: int, field_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """Which universes of one equity market hold each of these fields, in one read.
+
+        One query rather than one per field: each is a scan of the whole table, and the
+        Template Lab asks on every preview.
+        """
+        if not field_ids:
+            return []
+        return await self.catalog.query(
+            f"""
+            SELECT field_id, universe FROM data_field
+            WHERE instrument_type = 'EQUITY' AND region = ? AND delay = ?
+              AND field_id IN ({", ".join("?" for _ in field_ids)})
+            """,  # noqa: S608 - placeholders only
+            [region, delay, *field_ids],
         )
 
     # -- datasets & facets -----------------------------------------------

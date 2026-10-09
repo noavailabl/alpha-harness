@@ -41,6 +41,8 @@ class PowerPoolRequest(BaseModel):
     model: str | None = None
     #: What the LLM draws from. Empty is refused: see ``NO_NEUTRALIZATION``.
     neutralizations: list[str] = Field(default_factory=list, max_length=20)
+    #: The universes each Alpha is drawn from. Empty means every downloaded one.
+    universes: list[str] = Field(default_factory=list, max_length=20)
     cores: int = Field(default=search.MAX_CORES, ge=1, le=search.MAX_CORES)
     simulations: int = Field(default=0, ge=0, le=search.MAX_SIMULATIONS)
     #: The Data Explorer's filter the datasets were chosen under: only fields it shows are used.
@@ -153,6 +155,14 @@ async def _plan(body: PowerPoolRequest, state: Any) -> dict[str, Any]:
     schema = await state.metadata.cached_settings_schema()
     legal = legal_choices(schema, body.region, body.delay)
     universes = await synced_universes(state, legal, body.region, body.delay, body.universe)
+    if body.universes and universes:
+        chosen = [u for u in universes if u in set(body.universes)]
+        if not chosen:
+            problems.append(
+                f"None of the chosen universes is downloaded for {body.region} delay "
+                f"{body.delay}. Sync it in the Data Explorer, or choose another."
+            )
+        universes = chosen
     # The LLM draws from whichever the reader chose, in BRAIN's order.
     offered = [str(n) for n in choices(legal, "neutralization") if n != "NONE"]
     wanted = set(body.neutralizations)

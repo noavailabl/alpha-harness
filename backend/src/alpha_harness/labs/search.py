@@ -174,6 +174,11 @@ def field_choices(space: dict[str, Any]) -> dict[str, list[str]]:
     return choices
 
 
+def coverage(space: dict[str, Any]) -> tuple[str, list[str]]:
+    """The parameter the first pass covers, and the fields it gives a trial each."""
+    return "field", list(space["fields"])
+
+
 def first_pass(space: dict[str, Any], field_id: str) -> dict[str, Any]:
     """Fixed choices that try a field once, in the first universe that has it."""
     absent = space.get("absent") or {}

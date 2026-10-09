@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 PACKAGE = "alpha-harness"
-REPOSITORY = "noavailabl/alpha-harness"
+REPOSITORY_VARIABLE = "ALPHA_HARNESS_REPOSITORY"
+REPOSITORY = os.environ.get(REPOSITORY_VARIABLE) or "noavailabl/alpha-harness"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 #: Where a person goes to fetch a release by hand, when the app cannot do it for them.
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"
@@ -66,7 +67,7 @@ def _launcher_asset() -> str:
     arm = platform.machine().lower() in ("arm64", "aarch64")
     if sys.platform == "darwin":
         return f"AlphaHarness-macOS-{'arm64' if arm else 'x86_64'}.zip"
-    return "AlphaHarness-linux-x86_64"
+    return "AlphaHarness-linux-x86_64.tar.gz"
 
 
 #: The launcher download to fetch for this machine, for the notice that asks for a newer one.

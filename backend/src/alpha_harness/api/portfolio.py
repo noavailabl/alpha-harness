@@ -16,6 +16,10 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 Investability = Literal["max_trade", "max_position", "none"]
 
 
+#: The classification a region-agnostic child is shown under, in BRAIN's own words for it.
+RA_CLASS = "Region Agnostic"
+
+
 class PortfolioMember(Out):
     alpha_id: str
     name: str | None
@@ -41,6 +45,19 @@ class PortfolioMember(Out):
     returns: float | None
     drawdown: float | None
     margin: float | None
+    long_count: int | None
+    short_count: int | None
+    #: When BRAIN took it, ISO 8601.
+    date_submitted: str | None = None
+    #: The region-agnostic parent this Alpha was submitted under, or ``None`` for one of its own
+    #: region. Its siblings share it: BRAIN submits the passing children together.
+    ra_parent: str | None = None
+    #: Highest daily PnL correlation with any other submitted Alpha over BRAIN's four-year
+    #: window. Every Alpha in the portfolio, unlike BRAIN's Self-Correlation, which keeps Power
+    #: Pool Alphas apart. ``None`` without a series.
+    correlation: float | None
+    #: BRAIN's Production Correlation for the submitted Alpha, as its listing gives it.
+    prod_correlation: float | None = None
     has_series: bool
 
 
@@ -107,6 +124,8 @@ class PortfolioResult(Out):
     #: Pairs sharing enough days to be measured.
     measured_pairs: int
     highest: CorrelatedPair | None
+    #: The least correlated pair, which can be negative.
+    lowest: CorrelatedPair | None = None
     #: Why a series is missing, when the single-Alpha route tried to download one and could
     #: not. Null everywhere else: on this page a missing series is listed in ``missing``.
     problem: str | None = None
@@ -133,6 +152,10 @@ class PortfolioSyncStarted(Out):
 async def members(state: State) -> PortfolioMembers:
     """Every submitted Alpha stored locally."""
     rows = await state.alphas.submitted_members()
+    ids = [str(r["alpha_id"]) for r in rows]
+    series = await state.alphas.series(ids)
+    meta = await state.alphas.by_ids(ids)
+    highest = await asyncio.to_thread(portfolio.highest_correlations, series, meta, ids)
     out: list[PortfolioMember] = []
     for r in rows:
         pyramids = json_list(r["pyramids"])
@@ -145,7 +168,12 @@ async def members(state: State) -> PortfolioMembers:
                 universe=r["universe"],
                 investability=_investability(r),
                 tags=json_list(r["tags"]),
-                classifications=json_list(r["classifications"]),
+                # BRAIN gives a region-agnostic child no class of its own; named here so it
+                # can be filtered on like any other.
+                classifications=[
+                    *json_list(r["classifications"]),
+                    *([RA_CLASS] if r.get("ra_parent") else []),
+                ],
                 pyramids=pyramids,
                 categories=sorted({p.rsplit("/", 1)[-1] for p in pyramids}),
                 labelled=r["pyramids"] is not None,
@@ -155,6 +183,12 @@ async def members(state: State) -> PortfolioMembers:
                 returns=r["returns"],
                 drawdown=r["drawdown"],
                 margin=r["margin"],
+                long_count=r["long_count"],
+                ra_parent=r.get("ra_parent"),
+                date_submitted=r["date_submitted"].isoformat() if r.get("date_submitted") else None,
+                short_count=r["short_count"],
+                correlation=highest.get(str(r["alpha_id"])),
+                prod_correlation=r["prod_correlation"],
                 has_series=bool(r["has_series"]),
             )
         )

@@ -254,13 +254,15 @@ export function Fieldset({
   legend,
   hint,
   children,
+  className,
 }: {
   legend: ReactNode
   hint?: ReactNode
   children: ReactNode
+  className?: string
 }) {
   return (
-    <fieldset className="flex min-w-0 flex-col gap-1.5">
+    <fieldset className={cn('flex min-w-0 flex-col gap-1.5', className)}>
       <legend className="text-caption font-medium float-left w-full text-ink-muted">
         {legend}
       </legend>
@@ -372,12 +374,15 @@ export function Chips<V extends string>({
   onChange,
   label,
   disabled,
+  size = 'md',
 }: {
   items: { value: V; label: ReactNode; title?: string | undefined }[]
   value: V[]
   onChange: (value: V[]) => void
   label: string
   disabled?: boolean | undefined
+  /** `lg` lays a few important choices out as tiles that share the row between them. */
+  size?: 'md' | 'lg'
 }) {
   return (
     <ToggleGroup
@@ -386,14 +391,21 @@ export function Chips<V extends string>({
       value={value}
       disabled={disabled}
       onValueChange={(next) => onChange(next as V[])}
-      className="flex flex-wrap gap-1.5"
+      className={
+        size === 'lg'
+          ? 'grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2'
+          : 'flex flex-wrap gap-1.5'
+      }
     >
       {items.map((item) => (
         <Toggle
           key={item.value}
           value={item.value}
           title={item.title}
-          className="h-7 rounded-sm border whitespace-nowrap border-(--field-border) bg-surface-1 px-2 text-body-compact text-ink-subtle transition-colors hover:border-(--field-border-hover) hover:text-ink data-[disabled]:border-(--field-border-disabled) data-[disabled]:text-(--field-text-disabled) data-[pressed]:border-(--field-border-hover) data-[pressed]:bg-surface-3 data-[pressed]:text-ink"
+          className={cn(
+            'rounded-sm border whitespace-nowrap border-(--field-border) bg-surface-1 text-ink-muted transition-colors hover:border-(--field-border-hover) hover:text-ink data-[disabled]:border-(--field-border-disabled) data-[disabled]:text-(--field-text-disabled) data-[pressed]:border-primary data-[pressed]:bg-primary-subtle data-[pressed]:text-ink',
+            size === 'lg' ? 'h-11 px-4 text-body' : 'h-7 px-2 text-body-compact',
+          )}
         >
           {item.label}
         </Toggle>
@@ -719,9 +731,7 @@ export function Empty({
       <p role="status" className="text-body font-medium text-balance break-words text-ink">
         {title}
       </p>
-      {children && (
-        <div className="max-w-md text-body-compact text-pretty text-ink-subtle">{children}</div>
-      )}
+      {children && <div className="text-body-compact text-pretty text-ink-subtle">{children}</div>}
     </div>
   )
 }

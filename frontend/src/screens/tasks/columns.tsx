@@ -4,7 +4,7 @@ import type { ComponentProps } from 'react'
 import { cn } from '@/lib/cn'
 import { CORE_METRICS, CORE_ORDER, DASH, fmt } from '@/lib/format'
 import type { LabTask, RankedAlpha, TaskStatus } from '@/screens/tasks/api'
-import { type Badge, MetricBadge, signTone, TEXT_TONE } from '@/ui/kit'
+import { Badge, MetricBadge, signTone, TEXT_TONE } from '@/ui/kit'
 import type { Column, Sort } from '@/ui/table'
 
 export const setting = (r: RankedAlpha, key: string) => String(r.settings?.[key] ?? '')
@@ -65,6 +65,55 @@ export const INVESTABILITY: Column<RankedAlpha> = {
   cell: (r) => <span className="num truncate">{investability(r)}</span>,
 }
 
+/** Marks an Alpha simulated in Quick mode: real figures, but not one BRAIN will take. */
+export function QuickBadge({ alpha }: { alpha: RankedAlpha }) {
+  if (!alpha.quick) return null
+  return (
+    <Badge
+      tone="outline"
+      title={
+        alpha.refusedBy.length === 0
+          ? 'Simulated in Quick mode. It passed every check BRAIN ran, so it is being simulated again in full, the only mode BRAIN takes for submission.'
+          : 'Simulated in Quick mode, which runs only the checks that score an Alpha.'
+      }
+    >
+      Quick
+    </Badge>
+  )
+}
+
+/** The Alpha's BRAIN id: what a consultant searches BRAIN by and quotes. A click on the row
+ *  opens its details; Ctrl-click opens it on BRAIN. */
+export const ALPHA_ID: Column<RankedAlpha> = {
+  key: 'alphaId',
+  header: 'Alpha',
+  width: '104px',
+  sortable: true,
+  cell: (r) => <span className="num text-ink">{r.alphaId ?? DASH}</span>,
+}
+
+/** BRAIN wants it below 0.7, or a Sharpe 10% above each production Alpha it exceeds. */
+export const PROD_CORRELATION: Column<RankedAlpha> = {
+  key: 'prodCorrelation',
+  header: 'Production Correlation',
+  width: 'minmax(120px,1.1fr)',
+  align: 'right',
+  sortable: true,
+  cell: (r) =>
+    r.prodCorrelation == null ? (
+      <span className="text-ink-subtle">{DASH}</span>
+    ) : (
+      <span
+        className={cn(
+          'num',
+          r.prodCorrelation < 0.7 ? 'text-pnl-positive-text' : 'text-status-warning',
+        )}
+      >
+        {fmt.ratio(r.prodCorrelation, 4)}
+      </span>
+    ),
+}
+
 export const FAILED_CHECKS: Column<RankedAlpha> = {
   key: 'failed',
   header: 'Checks Failed',
@@ -72,7 +121,11 @@ export const FAILED_CHECKS: Column<RankedAlpha> = {
   sortable: true,
   cell: (r) =>
     r.failedChecks.length === 0 ? (
-      <span className="text-ink-subtle">{DASH}</span>
+      r.quick ? (
+        <QuickBadge alpha={r} />
+      ) : (
+        <span className="text-ink-subtle">{DASH}</span>
+      )
     ) : (
       <span className="truncate" title={r.failedChecks.join(', ')}>
         {r.failedChecks.map((name, i) => (
@@ -88,6 +141,19 @@ export const FAILED_CHECKS: Column<RankedAlpha> = {
         ))}
       </span>
     ),
+}
+
+/** Per row, for a sweep whose Truncation Agent set it market by market. */
+export const TRUNCATION: Column<RankedAlpha> = {
+  key: 'truncation',
+  header: 'Truncation',
+  width: 'minmax(84px,0.8fr)',
+  align: 'right',
+  cell: (r) => (
+    <span className="num">
+      {r.settings?.['truncation'] == null ? DASH : fmt.ratio(Number(r.settings['truncation']), 2)}
+    </span>
+  ),
 }
 
 export const DELAY: Column<RankedAlpha> = {
@@ -122,6 +188,15 @@ export const METRICS: Metric[] = [
   {
     key: 'afterCostSharpe',
     label: 'After-Cost Sharpe',
+    show: (v) => fmt.ratio(v),
+    signed: true,
+    best: 'max',
+  },
+  // The held-out years: an Alpha that decays shows it here, beside its full-period figures.
+  { key: 'testSharpe', label: 'Test Sharpe', show: (v) => fmt.ratio(v), signed: true, best: 'max' },
+  {
+    key: 'testFitness',
+    label: 'Test Fitness',
     show: (v) => fmt.ratio(v),
     signed: true,
     best: 'max',

@@ -52,9 +52,8 @@ def query_terms(search: str) -> str | None:
 async def rebuild(catalog: Catalog) -> int:
     """Build the search corpus and its BM25 index. Idempotent, and about two seconds.
 
-    Returns the number of fields indexed, or ``0`` when the ``fts`` extension is missing —
-    DuckDB fetches it from its repository on first use, so a machine that has never had a
-    network keeps substring search and nothing worse.
+    Returns the number of fields indexed, or ``0`` when ``fts`` is not loaded: a machine that
+    cannot download it (see :func:`build`) keeps substring search and nothing worse.
 
     The corpus is dropped again if the index cannot be built on top of it: a corpus without
     its index looks ready while answering every search with ``match_bm25 does not exist``.
@@ -72,9 +71,26 @@ async def rebuild(catalog: Catalog) -> int:
     except Exception:
         await catalog.execute(f"DROP TABLE IF EXISTS {TABLE}")
         raise
+    # Into the file at once: an index rebuild left in the write-ahead log was reported failing
+    # to replay ("Cannot drop entry fts_main_field_search"), which kept the app from starting.
+    try:
+        await catalog.execute("CHECKPOINT")
+    except Exception:
+        log.warning("catalog.search_checkpoint_failed", exc_info=True)
     indexed = int(await catalog.scalar(f"SELECT count(*) FROM {TABLE}") or 0)  # noqa: S608
     log.info("catalog.search_indexed", fields=indexed)
     return indexed
+
+
+async def build(catalog: Catalog) -> int:
+    """:func:`rebuild`, downloading ``fts`` first when it is missing.
+
+    Startup's alone, in the background: where DuckDB's repository is blocked the download
+    takes minutes to give up, and a sync that ended in it would read as running all along.
+    """
+    if not catalog.fts:
+        await catalog.install_fts()
+    return await rebuild(catalog)
 
 
 async def ready(catalog: Catalog) -> bool:

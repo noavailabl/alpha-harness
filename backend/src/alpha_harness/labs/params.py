@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
 
+from ..brain.schemas import TEST_PERIOD
 from ..schemas import Out
 
 if TYPE_CHECKING:
@@ -26,6 +27,8 @@ POWER_POOL_SAMPLER = "power-pool"
 SETTINGS_SAMPLER = "settings-sampler"
 #: Studies that re-shape one Alpha's expression at its own settings (tools.correlation_breaker).
 CORRELATION_BREAKER = "correlation-breaker"
+#: Studies that combine your submitted Alphas into SuperAlphas (labs.super_alpha).
+SUPER_LAB = "super-alpha"
 #: Studies that are research-lab tasks, run only from the Tasks tab, by their lab's name.
 TASK_SAMPLERS = {
     SEARCH_SAMPLER: "Search Lab",
@@ -34,6 +37,7 @@ TASK_SAMPLERS = {
     POWER_POOL_SAMPLER: "LLM Power Pool Lab",
     SETTINGS_SAMPLER: "Settings Sampler",
     CORRELATION_BREAKER: "Correlation Breaker",
+    SUPER_LAB: "Super Alpha Lab",
 }
 
 
@@ -64,7 +68,14 @@ class SearchParams(TaskParams):
 
 
 class TemplateParams(SearchParams):
-    tree: dict[str, Any]
+    #: The template as typed, ``$variables`` and all (``labs.template``).
+    template: str = ""
+    #: A task added while templates were built from blocks: run by ``labs.template_v1``.
+    tree: dict[str, Any] | None = None
+    truncation: float = 0.08
+    pasteurization: str = "ON"
+    nan_handling: str = "ON"
+    test_period: str = TEST_PERIOD
 
 
 class EvolutionParams(TaskParams):
@@ -105,6 +116,8 @@ class SettingsParams(TaskParams):
     #: Held at the source Alpha's values for every simulation in the sweep.
     decay: int = 0
     truncation: float = 0.08
+    #: Truncation set per market by the Truncation Agent instead of held at ``truncation``.
+    truncation_agent: bool = False
     nan_handling: str = "ON"
     #: ``P{years}Y{months}M0D``. Empty on a task added before it was recorded.
     test_period: str = ""
@@ -126,6 +139,18 @@ class BreakerParams(TaskParams):
     recipes: list[str] = Field(default_factory=list)
 
 
+class SuperParams(TaskParams):
+    """Super Alpha Lab: every selection and combo pairing is written up front."""
+
+    universe: str = ""
+    neutralization: str = ""
+    selection_limit: int = 30
+    #: ``IS``, ``OS``, or both: each pairing then runs once under each.
+    activation: list[str] = Field(default_factory=lambda: ["IS", "OS"])
+    #: The recipes queued, as ``selection · combo``, for the task's detail line.
+    recipes: list[str] = Field(default_factory=list)
+
+
 BY_SAMPLER: dict[str, type[TaskParams]] = {
     SEARCH_SAMPLER: SearchParams,
     TEMPLATE_SAMPLER: TemplateParams,
@@ -133,6 +158,7 @@ BY_SAMPLER: dict[str, type[TaskParams]] = {
     POWER_POOL_SAMPLER: PowerPoolParams,
     SETTINGS_SAMPLER: SettingsParams,
     CORRELATION_BREAKER: BreakerParams,
+    SUPER_LAB: SuperParams,
 }
 
 

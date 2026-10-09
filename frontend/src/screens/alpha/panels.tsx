@@ -177,7 +177,7 @@ export function VerdictPanel({
               `Status ${alpha.status}${alpha.dateSubmitted ? `, submitted ${fmt.date(alpha.dateSubmitted)}` : ''}.`}
             {kind === 'blocked' &&
               (isQuickMode(alpha)
-                ? 'This was run in Quick mode. Every figure on this page is the real one, but BRAIN does not run the submission checks on a Quick mode alpha and will not accept it. Simulate the same expression again with Quick mode off.'
+                ? 'This was run in Quick mode. Every figure on this page is the real one, but BRAIN does not run the submission checks on a Quick mode alpha and will not accept it. A task simulates each Quick Alpha that passes every check again in full, and that Alpha can be submitted.'
                 : 'Each bar shows the value against the limit it must clear. Fix these, then run Check Submission again.')}
             {kind === 'pending' &&
               (groups.pending.length === 0
@@ -752,7 +752,7 @@ export function LineagePanel({ lineage }: { lineage: AlphaLineage | null }) {
           [
             'Task',
             <Link key="task" to="/tasks" className={LINK}>
-              {lineage.task}
+              {lineage.taskName ?? lineage.task}
             </Link>,
           ],
           ...(lineage.generation !== null && lineage.generation !== undefined

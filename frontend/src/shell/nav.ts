@@ -36,6 +36,7 @@ export const LAB_TABS = [
   { tab: 'template', label: 'Template Lab', to: '/labs/template' },
   { tab: 'evolution', label: 'Evolution Lab', to: '/labs/evolution' },
   { tab: 'power-pool', label: 'LLM Power Pool Lab', to: '/labs/power-pool' },
+  { tab: 'super-alpha', label: 'Super Alpha Lab', to: '/labs/super-alpha' },
 ] as const
 
 /** The tools, each with its own route. Listed on the Tools screen and in ⌘K rather than

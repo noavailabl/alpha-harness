@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 #: Excluded from BRAIN's operator count, and never mutated: they fill gaps, not signal.
 UNCOUNTED = frozenset({"ts_backfill", "group_backfill"})
+#: A Power Pool Alpha's most operators and unique data fields, as :func:`operator_count` and
+#: :func:`data_fields` count them.
+MAX_OPERATORS, MAX_FIELDS = 8, 3
 #: Grouping fields, which never count as data fields (``interpret-results/alpha-submission.md``).
 GROUPING = (
     "market",
@@ -120,11 +123,13 @@ def _signature_params(definition: str, start: int) -> list[str] | None:
 
 # -- reading ---------------------------------------------------------------
 
+#: Template Lab writes two names BRAIN never sees: a ``$variable``, and ``...`` where a
+#: template's signal goes.
 _TOKEN = re.compile(
     r"""\s*(?:
         (?P<num>(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)
       | (?P<str>"[^"]*"|'[^']*')
-      | (?P<name>[A-Za-z_]\w*)
+      | (?P<name>\$?[A-Za-z_]\w*|\.\.\.)
       | (?P<op>&&|\|\||==|!=|<=|>=|[-+*/^<>!?:(),=;])
     )""",
     re.VERBOSE,
@@ -379,8 +384,9 @@ def data_fields(tree: Node, *, grouping: bool = False) -> list[str]:
     """
     nodes = walk(tree)
     assigned = {n.value for _, n in nodes if n.kind == "assign"}
-    return sorted(
-        {
+    # In order of first appearance, left to right, as the reader wrote them.
+    return list(
+        dict.fromkeys(
             n.value
             for path, n in nodes
             if n.kind == "name"
@@ -388,7 +394,7 @@ def data_fields(tree: Node, *, grouping: bool = False) -> list[str]:
             and n.value not in assigned
             and (grouping or n.value not in GROUPING)
             and n.value.lower() not in ("true", "false", "nan")
-        }
+        )
     )
 
 
@@ -398,10 +404,15 @@ def operator_names(tree: Node) -> list[str]:
 
 
 def operator_count(node: Node) -> int:
-    """BRAIN's count: every call and every arithmetic or logical operator, backfills excepted."""
+    """Power Pool's count: every call and every arithmetic or logical operator, backfills excepted.
+
+    A negative number is a constant, not an operator: BRAIN's own count agrees with this on
+    every one of 15,000 distinct expressions it has scored, counting backfills aside.
+    """
+    negative = node.kind == "unary" and node.value == "-" and node.args[0].kind == "num"
     own = int(
         (node.kind == "call" and node.value not in UNCOUNTED)
-        or node.kind in ("unary", "binary", "ternary")
+        or (node.kind in ("unary", "binary", "ternary") and not negative)
     )
     return own + sum(operator_count(child) for child in children(node))
 

@@ -119,6 +119,8 @@ def alpha_row(alpha: Alpha, fetched_at: datetime) -> tuple[Any, ...]:
         stats.pnl if stats else None,
         _end_date(alpha),
         settings.simulation_mode if settings else None,
+        stats.prod_correlation if stats else None,
+        stats.self_correlation if stats else None,
     )
 
 
@@ -153,19 +155,20 @@ EVOLVABLE = "(coalesce(a.sim_type, 'REGULAR') IN ('REGULAR', 'RA_CHILD'))"
 EVOLVABLE_TYPES = frozenset({"REGULAR", "RA_CHILD"})
 
 
-def family_of(parent: str) -> str:
+def family_of(parent: str, child: str = "c") -> str:
     """SQL: ``c`` is a region-agnostic child of the row aliased ``parent``.
 
     Rows carry no parent id, but BRAIN writes a family in one second, from one expression and
     one set of settings (measured on every family stored: the same expression recurs at
     other seconds, never with the same second and settings).
     """
+    c = child
     return f"""
-        c.sim_type = 'RA_CHILD' AND c.expression = {parent}.expression
-        AND c.date_created = {parent}.date_created AND c.delay = {parent}.delay
-        AND c.neutralization IS NOT DISTINCT FROM {parent}.neutralization
-        AND c.decay IS NOT DISTINCT FROM {parent}.decay
-        AND c.truncation IS NOT DISTINCT FROM {parent}.truncation
+        {c}.sim_type = 'RA_CHILD' AND {c}.expression = {parent}.expression
+        AND {c}.date_created = {parent}.date_created AND {c}.delay = {parent}.delay
+        AND {c}.neutralization IS NOT DISTINCT FROM {parent}.neutralization
+        AND {c}.decay IS NOT DISTINCT FROM {parent}.decay
+        AND {c}.truncation IS NOT DISTINCT FROM {parent}.truncation
     """
 
 
@@ -711,6 +714,9 @@ class AlphaVault:
     async def submitted_members(self) -> list[dict[str, Any]]:
         """Every submitted Alpha with what the Portfolio page filters on.
 
+        A region-agnostic parent is left out: BRAIN submits its passing children, which carry
+        the PnL and count towards combined performance, and the parent has no figures of its own.
+
         The figures are BRAIN's own, as it reported them for the Alpha. Nothing here is
         recomputed: only the combination of several Alphas is ours to work out, because
         that is the one thing BRAIN does not publish.
@@ -720,12 +726,18 @@ class AlphaVault:
             SELECT a.alpha_id, a.name, a.region, a.delay, a.universe, a.max_trade,
                    a.max_position, a.tags, a.classifications, a.pyramids, a.date_submitted,
                    a.sharpe, a.turnover, a.fitness, a.returns, a.drawdown, a.margin,
+                   a.long_count, a.short_count, a.prod_correlation,
+                   (
+                       SELECT p.alpha_id FROM alpha p
+                       WHERE p.sim_type = 'RA_PARENT' AND {family_of("p", "a")}
+                       ORDER BY p.alpha_id LIMIT 1
+                   ) AS ra_parent,
                    EXISTS (
                        SELECT 1 FROM alpha_pnl p
                        WHERE p.alpha_id = a.alpha_id AND p.turnover IS NOT NULL
                    ) AS has_series
             FROM alpha a
-            WHERE {SUBMITTED}
+            WHERE {SUBMITTED} AND coalesce(a.sim_type, 'REGULAR') <> 'RA_PARENT'
             ORDER BY a.date_submitted DESC NULLS LAST, a.alpha_id
             """  # noqa: S608
         )

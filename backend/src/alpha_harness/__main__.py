@@ -21,7 +21,8 @@ PORT_TAKEN = frozenset({errno.EADDRINUSE, 10048})
 PAGE_RETURN_SECONDS = 10.0
 
 
-async def _serve() -> None:
+async def _serve() -> str | None:
+    """Serve until the app is closed. Returns why it could not start, if it could not."""
     listening = _listen()
     from .main import app
 
@@ -29,7 +30,17 @@ async def _serve() -> None:
     # The one handle that can stop this process gracefully. Reached by the update route, which
     # has to close the app so the launcher can replace it while nothing holds the files open.
     app.state.server = server
-    serving = asyncio.create_task(server.serve(sockets=[listening]))
+
+    async def serve() -> None:
+        # uvicorn ends a failed startup with ``sys.exit`` inside this task, which reaches the
+        # log as a traceback of uvicorn's own frames; the reason is returned below instead.
+        try:
+            await server.serve(sockets=[listening])
+        except SystemExit:
+            if getattr(app.state, "startup_failure", None) is None:
+                raise
+
+    serving = asyncio.create_task(serve())
     # Kept referenced for the life of the server, so it is never collected mid-watch.
     watching = asyncio.create_task(_orphaned(server)) if _launched() else None
     # Startup reconciles in-flight simulations first; open the page once it can answer.
@@ -42,6 +53,10 @@ async def _serve() -> None:
     await serving
     if watching is not None:
         watching.cancel()
+    failure = getattr(app.state, "startup_failure", None)
+    if failure is None:
+        return None
+    return f"Alpha Harness could not start: {str(failure) or type(failure).__name__}"
 
 
 def _listen() -> socket.socket:
@@ -112,7 +127,11 @@ async def _orphaned(server: uvicorn.Server) -> None:
 
 
 def main() -> None:
-    asyncio.run(_serve())
+    failure = asyncio.run(_serve())
+    if failure is not None:
+        # A message, not a code: Python writes it last in the launcher's log, which is the
+        # part of the log the launcher's message box shows.
+        raise SystemExit(failure)
 
 
 if __name__ == "__main__":

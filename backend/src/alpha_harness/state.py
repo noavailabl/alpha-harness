@@ -151,7 +151,7 @@ class AppState:
         # A catalog downloaded before the search index existed still has none; building it
         # costs a couple of seconds and nothing else depends on it, so it must not block.
         if not await search.ready(self.catalog):
-            spawn(search.rebuild(self.catalog), name="catalog-fts-index")
+            spawn(search.build(self.catalog), name="catalog-fts-index")
         # Same shape: an Alpha whose series was stored before After-Cost Sharpe existed has none,
         # and it is worked out from that series rather than downloaded again.
         spawn(self.alphas.rebuild_after_cost_sharpe(), name="vault-after-cost-sharpe")
@@ -257,6 +257,11 @@ class AppState:
                     log.warning("session.check_failed", exc_info=True)
                     return False
             if now - self._last_login_attempt < LOGIN_RETRY_SECONDS:
+                return False
+            if self.auth.session.inquiry:
+                # An identity check only the person can finish. A silent sign-in would start
+                # yet another, and each spends BRAIN's lockout budget: hourly, that locked an
+                # account out without anyone signing in.
                 return False
             if await self.auth.get_credential() is None:
                 return False

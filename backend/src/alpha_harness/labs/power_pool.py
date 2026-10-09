@@ -26,6 +26,8 @@ from ..tasks import spawn
 from . import scheduler, search
 from .fastexpr import (
     GROUPING,
+    MAX_FIELDS,
+    MAX_OPERATORS,
     ParseError,
     node_at,
     operator_count,
@@ -37,7 +39,6 @@ from .fastexpr import (
 )
 from .objectives import FAILURE
 from .params import PowerPoolParams, params_of
-from .template import DATA_FIELDS
 
 if TYPE_CHECKING:  # pragma: no cover
     import asyncio
@@ -49,7 +50,8 @@ log = structlog.get_logger(__name__)
 
 PER_CALL = 20
 FIELDS_PER_CALL = 200
-MAX_OPERATORS, MAX_FIELDS = 8, 3
+#: Price and volume basics every market has, offered beside the chosen datasets' own fields.
+DATA_FIELDS = ("close", "open", "high", "low", "vwap", "volume", "adv20", "returns", "cap")
 PROPOSED = "Written by the LLM; waiting for cores."
 SCHEMA = {
     "type": "object",
